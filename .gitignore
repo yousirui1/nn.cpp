@@ -1,0 +1,16 @@
+*.ipch
+Debug
+.vs
+x64
+Release
+*.user
+*.d
+*.o
+*.obj
+debug.*
+release.*
+build
+*.a
+*.so
+*.log
+__pycache__
