@@ -13,7 +13,7 @@ ROOT=../
 #--------------------------------------------------------------------
 INCLUDES = $(ROOT)/base/include ./include \
 		   $(3RD_DIR)/ggml/$(ARCH)/include  \
-		   $(ROOT)/base/miniaudio
+		   $(ROOT)/base/miniaudio 
 
 #-------------------------------Source-------------------------------
 #
