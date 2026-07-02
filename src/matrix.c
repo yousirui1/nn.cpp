@@ -161,10 +161,6 @@ int set_shape_name(shape_t *shape, const char *name)
 }
 
 
-
-
-
-
 matrix_t *matrix_alloc(int data_type, int num_dims, ...)
 {
     int i;

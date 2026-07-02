@@ -2,43 +2,11 @@
 #include "model.h"
 #include "gguf.h"
 #include "ggml_model.h"
+#include "ggml_handle.hpp"
+#include "ggml-backend.h"
 
-struct ggml_model_t
-{
-    char name[128];
-   
-    int (*load_model)(struct ggml_handle_t *ggml_handle, const char *model_path);
-
-    int (*inference)(struct ggml_handle_t *ggml_handle, matrix_t **input_matrix, matrix_t **output_matrix);
-    void (*unload_model)(struct ggml_handle_t *ggml_handle);
-};
-
-static struct ggml_model_t ggml_models[] = 
-{
-    //name                  load        inference       unload
-    {"SenseVoiceSmall",     NULL,       NULL ,        NULL},
-    {"FsmnVad",             NULL,       NULL ,        NULL},
-};
-
-static int is_ggml_init = 0;
+static int is_init = 0;
 static ggml_backend_t ggml_backend;
-
-static int get_ggml_model(struct ggml_handle_t *ggml_handle)
-{
-    int i;
-    for(i = 0; i < ARRAY_SIZE(ggml_models); i++)
-    {   
-        if(STRPREFIX(ggml_models[i].name, ggml_handle->model_name))
-        {
-            LOG_DEBUG("find name %s", ggml_handle->model_name);
-            ggml_handle->load_model = ggml_models[i].load_model;
-            ggml_handle->inference = ggml_models[i].inference;
-            ggml_handle->unload_model = ggml_models[i].unload_model;
-            return SUCCESS;
-        }
-    }   
-    return ERROR;
-}
 
 void print_tensor_shape(struct ggml_tensor *tensor)
 {
@@ -118,9 +86,9 @@ int ggml_use_gpu(void *handle, int enable)
 
 int init_ggml()
 {
-    if(is_ggml_init)
+    if(is_init)
     {
-        is_ggml_init++;
+        is_init++;
         return SUCCESS;
     }
     ggml_time_init();
@@ -196,7 +164,7 @@ int init_ggml()
         LOG_DEBUG("concat_i32 %d repeat_f16 %d", ggml_handle->op_caps.concat_i32, ggml_handle->op_caps.repeat_f16);
     }
 #endif
-    is_ggml_init = 1;
+    is_init = 1;
     return SUCCESS;
 }
 
@@ -249,13 +217,13 @@ bool ggml_graph_compute_helper(ggml_backend_sched_t sched, struct ggml_cgraph *g
 
 void deinit_ggml()
 {
-    if(is_ggml_init == 1)
+    if(is_init == 1)
     {
-        is_ggml_init = 0;
+        is_init = 0;
     }
     else
     {
-        is_ggml_init --;
+        is_init --;
     }
 }
 
@@ -332,6 +300,7 @@ void *ggml_model_alloc(const char *model_data, uint64_t model_size,
             strncpy(input_shape[i].name, ggml_handle->input_names[i], sizeof(input_shape[i].name));
         print_shape(input_shape[i]);
     }
+    *in_nodes = ggml_handle->in_nodes;
     
     for(i = 0; i < ggml_handle->out_nodes; i++)
     {
@@ -342,6 +311,7 @@ void *ggml_model_alloc(const char *model_data, uint64_t model_size,
             strncpy(output_shape[i].name, ggml_handle->output_names[i], sizeof(output_shape[i].name));
         print_shape(output_shape[i]);
     }
+    *out_nodes = ggml_handle->out_nodes;
     printf("======================== ggml end ========================== \n");
     return ggml_handle;
 }

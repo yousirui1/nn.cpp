@@ -1,25 +1,58 @@
 #include "base.h"
 #include "gguf_loader.hpp"
-#include "ggml_silero.hpp"
+#include "ggml_sensevoice.hpp"
 #include "ggml_handle.hpp"
 
-void get_silero_default_params(struct silero_params_t *params)
+void get_sensevoice_default_params(struct sensevoice_params_t *params)
 {
-    params->n_encoder_layer = 4;
-    params->lstm_state_dim = 128;
+    params->n_vocab = 25055;                // number of vocab
+    params->n_max_audio_length = 20000;    //
+    params->n_encoder_hidden_state = 512;  // dim of hidden state
+    params->n_encoder_linear_units = 2048;
+    params->n_encoder_attention_heads = 4;  // head of self attention
+    params->n_encoder_layers = 50;          // num block of encoder
+    params->n_tp_encoder_layers = 20;
+    params->n_encoder_0_norm_size = 560;
+    params->n_decoder_hidden_state = 512;
+    params->n_decoder_linear_units = 2048;
+    params->n_decoder_attention_heads = 4;
+    params->n_decoder_layers = 14; 
+    params->fsmn_kernel_size = 11; 
+    params->n_vad_encoder_layers = 4;
+    params->n_predictor_dim = 512;
+    params->predictor_tail_threshold = 0.45;
+    
+    // for auto-detection, set to nullptr, "" or "auto"
+    params->language = nullptr;
+    
+    params->n_mels = 80;  // dim of mels
+    strncpy(params->window, "hamming", sizeof(params->window));
+    params->frame_length = 25;
+    params->frame_shift = 10;
+    params->lfr_m = 7;
+    params->lfr_n = 6;
+    params->ftype = 1;
+    params->eps = 1e-5f;
+    params->n_audio_ctx = 1600;
 
-    params->n_batch = 1;
+    params->n_batch;
 
-    params->threshold      = 0.5f;
-    params->neg_threshold = 0.35f;
-    params->min_speech_duration_ms = 250;
-    params->max_speech_duration_ms = 15000;
-    params->min_silence_duration_ms = 100;
-    params->speech_pad_ms = 30;
+    params->language_id = 0;
+    
+    //to do
+    params->use_itn = false;
+    params->flash_attn = false;
+    
+    //to do kv
+    params->wtype = ggml_type::GGML_TYPE_F16;  // weight type (FP32 / FP16 / QX)
+    params->itype =
+            ggml_type::GGML_TYPE_F16;  // intermediate type (FP32 or FP16)
+
 }
 
-ggml_cgraph *silero_build_cgraph(struct silero_model_t *model, struct silero_state_t *state)
+ggml_cgraph *sensevoice_build_cgraph(struct sensevoice_model_t *model, struct sensevoice_state_t *state)
 {
+#if 0
     struct ggml_init_params params = {
             /*.mem_size   =*/state->meta.size(),
             /*.mem_buffer =*/state->meta.data(),
@@ -147,38 +180,40 @@ ggml_cgraph *silero_build_cgraph(struct silero_model_t *model, struct silero_sta
     ggml_build_forward_expand(gf, cur);
     ggml_free(ctx0);
     return gf;
+#endif
 }
 
-void unload_silero_model(struct ggml_handle_t *ggml_handle)
+void unload_sensevoice_model(struct ggml_handle_t *ggml_handle)
 {
 
 }
 
-int load_silero_model(struct ggml_handle_t *ggml_handle, const char *model_path)
+int load_sensevoice_model(struct ggml_handle_t *ggml_handle, const char *model_path)
 {
+#if 0
     struct ggml_context *ctx;
     ggml_backend_buffer_t buffer = nullptr;
 
-    struct silero_params_t *params = new silero_params_t;
+    struct sensevoice_params_t *params = new sensevoice_params_t;
     if(NULL == params)
     {
-        LOG_ERROR("silero params error %s", strerror(errno));
+        LOG_ERROR("sensevoice params error %s", strerror(errno));
         return ERROR;
     }
-    get_silero_default_params(params);
+    get_sensevoice_default_params(params);
 
-    struct silero_model_t *model = new silero_model_t;
+    struct sensevoice_model_t *model = new sensevoice_model_t;
     if(NULL == model)
     {
-        LOG_ERROR("silero malloc error %s", strerror(errno));
+        LOG_ERROR("sensevoice malloc error %s", strerror(errno));
         delete params;
         return ERROR;
     }
 
-    struct silero_state_t *state = new silero_state_t;
+    struct sensevoice_state_t *state = new sensevoice_state_t;
     if(NULL == model)
     {
-        LOG_ERROR("silero state error %s", strerror(errno));
+        LOG_ERROR("sensevoice state error %s", strerror(errno));
         delete model;
         delete params;
         return ERROR;
@@ -260,7 +295,7 @@ int load_silero_model(struct ggml_handle_t *ggml_handle, const char *model_path)
         true
     );
 
-    ggml_cgraph *gf = silero_build_cgraph(model, state);
+    ggml_cgraph *gf = sensevoice_build_cgraph(model, state);
     ggml_backend_sched_alloc_graph(state->sched, gf);
     set_graph_backend(gf, state->sched, ggml_handle->backend, nullptr, -1);
     ggml_backend_sched_reset(state->sched);
@@ -290,16 +325,18 @@ int load_silero_model(struct ggml_handle_t *ggml_handle, const char *model_path)
     ggml_handle->out_nodes = 1;
     //to do no use
     set_shape(&ggml_handle->output_shape[0], TENSOR_FLOAT32, 1, params->max_speech_duration_ms * 16);
+#endif
     return SUCCESS;
 }
 
-int silero_frontend_process(struct ggml_handle_t *ggml_handle, matrix_t **input_matrix)
+int sensevoice_frontend_process(struct ggml_handle_t *ggml_handle, matrix_t **input_matrix)
 {
+#if 0
     int chunk_size = 512;
     int context_size = 576;
     int frame_size = 640;
     int offset = 0;
-    struct silero_state_t *state = (struct silero_state_t *)ggml_handle->state;
+    struct sensevoice_state_t *state = (struct sensevoice_state_t *)ggml_handle->state;
     if(1)
     {
         memcpy(&input_matrix[0]->data_fp[0], state->chunk_cache, 64 * sizeof(float));
@@ -310,14 +347,16 @@ int silero_frontend_process(struct ggml_handle_t *ggml_handle, matrix_t **input_
         }
         memcpy(state->chunk_cache,  &input_matrix[1]->data_fp[chunk_size - 64], 64 * sizeof(float));
     }
+#endif
     return SUCCESS;
 }
 
-int silero_backend_process(struct ggml_handle_t *ggml_handle, float speech_prob)
+int sensevoice_backend_process(struct ggml_handle_t *ggml_handle, float speech_prob)
 {
+#if 0
     int sample_rate = 16000;
-    struct silero_params_t *params = (struct silero_params_t *)ggml_handle->params;
-    struct silero_state_t *state = (struct silero_state_t *)ggml_handle->state;
+    struct sensevoice_params_t *params = (struct sensevoice_params_t *)ggml_handle->params;
+    struct sensevoice_state_t *state = (struct sensevoice_state_t *)ggml_handle->state;
 
     int chunk_size = 512;
     //to do 
@@ -393,28 +432,30 @@ int silero_backend_process(struct ggml_handle_t *ggml_handle, float speech_prob)
             triggered = false;
         }
     }
+#endif
     return SUCCESS;
 }
 
 
-int silero_inference(struct ggml_handle_t *ggml_handle, matrix_t **input_matrix,
+int sensevoice_inference(struct ggml_handle_t *ggml_handle, matrix_t **input_matrix,
                         matrix_t **output_matrix)
 {
-    struct silero_params_t *params = (struct silero_params_t *)ggml_handle->params;
-    struct silero_model_t *model = (struct silero_model_t *)ggml_handle->model;
-    struct silero_state_t *state = (struct silero_state_t *)ggml_handle->state;
+#if 0
+    struct sensevoice_params_t *params = (struct sensevoice_params_t *)ggml_handle->params;
+    struct sensevoice_model_t *model = (struct sensevoice_model_t *)ggml_handle->model;
+    struct sensevoice_state_t *state = (struct sensevoice_state_t *)ggml_handle->state;
 
 
     auto & sched = state->sched;
-    ggml_cgraph *gf = silero_build_cgraph(model, state);
+    ggml_cgraph *gf = sensevoice_build_cgraph(model, state);
     if (!ggml_backend_sched_alloc_graph(sched, gf))
     {
         // should never happen as we pre-allocate the memory
-        LOG_ERROR("silero_inference ggml_backend_sched_alloc_graph error");
+        LOG_ERROR("sensevoice_inference ggml_backend_sched_alloc_graph error");
         return ERROR;
     }
 
-    silero_frontend_process(ggml_handle, input_matrix);
+    sensevoice_frontend_process(ggml_handle, input_matrix);
 
     // set the input
     struct ggml_tensor *data = ggml_graph_get_tensor(gf, "audio_chunk");
@@ -427,7 +468,7 @@ int silero_inference(struct ggml_handle_t *ggml_handle, matrix_t **input_matrix,
 
     if (!ggml_graph_compute_helper(sched, gf, ggml_handle->n_thread))
     {
-        LOG_ERROR("silero_inference ggml_graph_compute_helper error");
+        LOG_ERROR("sensevoice_inference ggml_graph_compute_helper error");
         return ERROR;
     }
 
@@ -441,8 +482,9 @@ int silero_inference(struct ggml_handle_t *ggml_handle, matrix_t **input_matrix,
 
     ggml_backend_tensor_get(ggml_graph_get_tensor(gf, "logit"), &speech_prob, 0, sizeof(speech_prob));
 
-    silero_backend_process(ggml_handle, speech_prob);
+    sensevoice_backend_process(ggml_handle, speech_prob);
 
+#endif
     return SUCCESS;
 }
 
