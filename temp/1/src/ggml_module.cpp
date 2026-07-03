@@ -96,9 +96,8 @@ void LSTM::onload(const gguf_loader &loader, const std::string &prefix)
 // outgate = torch.sigmoid(chunked_gates[3])
 // cy = forgetgate * hx[1] + ingate * cellgate
 // hy = outgate * torch.tanh(cy)
-ggml_tensor *LSTM::build_cgraph(ggml_context *ctx0, ggml_tensor *cur) const
+ggml_tensor *LSTM::build_cgraph(ggml_context *ctx, ggml_tensor *x) const
 {
-#if 0
     struct ggml_tensor *in_lstm_hidden_state = ggml_new_tensor_1d(ctx, x->type, x->ne[1]);
     struct ggml_tensor *in_lstm_context = ggml_new_tensor_1d(ctx, x->type, x->ne[1]);
 
@@ -133,68 +132,8 @@ ggml_tensor *LSTM::build_cgraph(ggml_context *ctx0, ggml_tensor *cur) const
     ggml_set_name(out_lstm_context, "out_lstm_context");
     out_lstm_hidden_state = ggml_mul(ctx, out_gates, ggml_tanh(ctx, out_lstm_context));
     ggml_set_name(out_lstm_hidden_state, "out_lstm_hidden_state");
-    
 
     return out_lstm_hidden_state;
-#endif
-
-        struct ggml_tensor* in_lstm_hidden_state = ggml_new_tensor_1d(ctx0, cur->type, cur->ne[1]);
-        struct ggml_tensor*  in_lstm_context = ggml_new_tensor_1d(ctx0, cur->type, cur->ne[1]);
-
-        struct ggml_tensor* out_lstm_hidden_state;
-        struct ggml_tensor*  out_lstm_context;
-
-        ggml_set_name(in_lstm_context, "in_lstm_context");
-        ggml_set_name(in_lstm_hidden_state, "in_lstm_hidden_state");
-
-        // lstm cell
-        // ref: https://github.com/pytorch/pytorch/blob/1a93b96815b5c87c92e060a6dca51be93d712d09/aten/src/ATen/native/RNN.cpp#L298-L304
-        // gates = x @ self.weight_ih.T + self.bias_ih + hx[0] @ self.weight_hh.T + self.bias_hh
-        // chunked_gates = gates.chunk(4, dim=-1)
-        // ingate = torch.sigmoid(chunked_gates[0])
-        // forgetgate = torch.sigmoid(chunked_gates[1])
-        // cellgate = torch.tanh(chunked_gates[2])
-        // outgate = torch.sigmoid(chunked_gates[3])
-        // cy = forgetgate * hx[1] + ingate * cellgate
-        // hy = outgate * torch.tanh(cy)
-
-        //cur = ggml_cont(ctx0, cur);
-        cur = ggml_cont(ctx0, ggml_transpose(ctx0, cur));
-
-        struct ggml_tensor *gates = ggml_add(
-                ctx0,
-                ggml_add(ctx0, ggml_mul_mat(ctx0,
-                                            lstm_weight_ih,
-                                            cur),
-                         lstm_bias_ih),
-
-                ggml_add(ctx0, ggml_mul_mat(ctx0,
-                                            lstm_weight_hh,
-                                            in_lstm_hidden_state),
-                         lstm_bias_hh));
-        ggml_set_name(gates, "gates");
-
-        struct ggml_tensor * input_gates = ggml_sigmoid(ctx0, ggml_view_2d(ctx0, gates, gates->ne[0] / 4, gates->ne[1] , gates->nb[1], 0));
-        struct ggml_tensor * forget_gates = ggml_sigmoid(ctx0, ggml_view_2d(ctx0, gates, gates->ne[0] / 4, gates->ne[1], gates->nb[1], gates->nb[0] / 4 * gates->ne[0]));
-        struct ggml_tensor * cell_gate = ggml_tanh(ctx0, ggml_view_2d(ctx0, gates, gates->ne[0] / 4, gates->ne[1], gates->nb[1], 2 * gates->nb[0] / 4 * gates->ne[0]));
-        struct ggml_tensor * out_gates = ggml_sigmoid(ctx0, ggml_view_2d(ctx0, gates, gates->ne[0] / 4, gates->ne[1], gates->nb[1], 3 * gates->nb[0] / 4 * gates->ne[0]));
-
-        ggml_set_name(input_gates, "input_gates");
-        ggml_set_name(forget_gates, "forget_gates");
-        ggml_set_name(cell_gate, "cell_gates");
-        ggml_set_name(out_gates, "out_gates");
-
-        out_lstm_context = ggml_add(ctx0,
-                                          ggml_mul(ctx0, forget_gates, in_lstm_context),
-                                          ggml_mul(ctx0, input_gates, cell_gate)
-                                          );
-        ggml_set_name(out_lstm_context, "out_lstm_context");
-        ggml_set_output(out_lstm_context);
-        out_lstm_hidden_state = ggml_mul(ctx0, out_gates, ggml_tanh(ctx0, out_lstm_context));
-	ggml_set_name(out_lstm_hidden_state, "out_lstm_hidden_state");
-	ggml_set_output(out_lstm_hidden_state);
-
-	return out_lstm_hidden_state;
 }
 
 ggml_tensor *Linear::build_cgraph(ggml_context *ctx, ggml_tensor *x) const

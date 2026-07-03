@@ -490,19 +490,21 @@ int main(int argc, char *argv[])
                     out_nodes, output_shape, output_matrix, 1);
 
 
-    //ggml_inference(handle, input_matrix, output_matrix, 1);
+    ggml_inference(handle, input_matrix, output_matrix, 1);
 
 
-    //while(1)
+#if 0
+    while(1)
     {
     offset = 0;
     do{
-        memcpy(input_matrix[1]->data_fp, wav_buf + offset, 512 * sizeof(float));
-        ggml_inference(handle, input_matrix, output_matrix, 0); 
+        memcpy(model.input_matrix[1]->data_fp, wav_buf + offset, 512 * sizeof(float));
+        model.inference(model.handle, model.input_matrix, model.output_matrix, 0); 
         offset += seg_sample;
         //usleep(seg_time);
     }while(wav_count > seg_sample + offset);
     }
+#endif
 
     ggml_data_free(handle, input_matrix, output_matrix);
     ggml_model_free(handle);
