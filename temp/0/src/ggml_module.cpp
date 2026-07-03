@@ -1,6 +1,26 @@
 #include "base.h"
-#include "gguf_loader.h"
-#include "ggml_module.h"
+#include "ggml_module.hpp"
+#include "gguf_loader.hpp"
+#include "ggml_handle.hpp"
+#include "ggml_model_list.hpp"
+
+//to do
+int get_ggml_model(struct ggml_handle_t *ggml_handle)
+{
+    int i;
+    for(i = 0; i < ARRAY_SIZE(ggml_models); i++)
+    {   
+        if(STRPREFIX(ggml_models[i].name, ggml_handle->model_name))
+        {
+            LOG_DEBUG("find name %s", ggml_handle->model_name);
+            ggml_handle->load_model = ggml_models[i].load_model;
+            ggml_handle->inference = ggml_models[i].inference;
+            ggml_handle->unload_model = ggml_models[i].unload_model;
+            return SUCCESS;
+        }
+    }   
+    return ERROR;
+}
 
 // faster matrix multiplications for tensors that do not have dimension 0 divisible by "pad"
 // the idea is to represent the original matrix multiplication:
@@ -15,15 +35,15 @@
 // and X_1 and Y_1 are the remaining views. X_1 and Y_1 end up being small matrices that can be processed with more
 // general-purpose kernels
 //
-static struct ggml_tensor * ggml_mul_mat_pad(struct ggml_context * ctx, struct ggml_tensor * x, struct ggml_tensor * y, int pad = 32) { 
+static struct ggml_tensor * ggml_mul_mat_pad(struct ggml_context * ctx, struct ggml_tensor * x, struct ggml_tensor * y, int pad = 32) {
     // use padding only if dimension 0 is at least 8 times larger than the padding
     // else we won't get much benefit from the optimization
     const int n_pad_req = 8;
 
     if (x->ne[0] % pad == 0 || x->ne[0] / pad < n_pad_req) 
-    {   
-        return ggml_mul_mat(ctx, x, y); 
-    }   
+	{
+        return ggml_mul_mat(ctx, x, y);
+    }
 
     struct ggml_tensor * x_0 = ggml_view_3d(ctx, x, (x->ne[0]/pad)*pad, x->ne[1], x->ne[2], x->nb[1], x->nb[2], 0);
     struct ggml_tensor * x_1 = ggml_view_3d(ctx, x,  x->ne[0]%pad,      x->ne[1], x->ne[2], x->nb[1], x->nb[2], x_0->ne[0]*x_0->nb[0]);
@@ -41,6 +61,7 @@ static struct ggml_tensor * ggml_mul_mat_pad(struct ggml_context * ctx, struct g
 #if defined(GGML_USE_METAL)
 #define ggml_mul_mat ggml_mul_mat_pad
 #endif
+
 
 void Module::onload(const gguf_loader& loader, const std::string& prefix) {}
 
@@ -61,10 +82,10 @@ ggml_tensor *STFT::build_cgraph(ggml_context *ctx, ggml_tensor *x) const
 
     ggml_tensor *real_part = ggml_view_2d(ctx, x, x->ne[0], x->ne[1] / 2, x->nb[1], 0);
     ggml_set_name(real_part, "real_part");
-
+    
     ggml_tensor *image_part = ggml_view_2d(ctx, x, x->ne[0], x->ne[1] / 2, x->nb[1], x->nb[0] * x->ne[0] * x->ne[1] / 2);
     ggml_set_name(image_part, "image_part");
-
+ 
 
     x = ggml_sqrt(ctx,
                     ggml_add(ctx,
@@ -132,11 +153,11 @@ ggml_tensor *LSTM::build_cgraph(ggml_context *ctx, ggml_tensor *x) const
     ggml_set_name(out_lstm_context, "out_lstm_context");
     out_lstm_hidden_state = ggml_mul(ctx, out_gates, ggml_tanh(ctx, out_lstm_context));
     ggml_set_name(out_lstm_hidden_state, "out_lstm_hidden_state");
-
+   
     return out_lstm_hidden_state;
 }
 
-ggml_tensor *Linear::build_cgraph(ggml_context *ctx, ggml_tensor *x) const
+ggml_tensor *Linear::build_cgraph(ggml_context *ctx, ggml_tensor *x) const 
 {
     auto out = ggml_mul_mat(ctx, weight, x);
     if(bias)
@@ -154,6 +175,7 @@ void FSMNBlock::onload(const gguf_loader& loader, const std::string& prefix)
 
 ggml_tensor *FSMNBlock::build_cgraph(ggml_context *ctx, ggml_tensor *x) const
 {
+
 #if 0
     struct ggml_tensor *in_lstm_hidden_state = ggml_new_tensor_1d(ctx, x->type, x->ne[1]);
     struct ggml_tensor *in_lstm_context = ggml_new_tensor_1d(ctx, x->type, x->ne[1]);
@@ -194,4 +216,5 @@ ggml_tensor *FSMNBlock::build_cgraph(ggml_context *ctx, ggml_tensor *x) const
 #endif
     return x;
 }
+
 

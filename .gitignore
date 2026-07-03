@@ -14,3 +14,5 @@ build
 *.so
 *.log
 __pycache__
+vallog.txt
+*.sw*

@@ -9,7 +9,7 @@
 #include <type_traits>
 #include <string>
 
-inline
+static inline
 std::string combine_prefix(const std::string& prefix, const char* name)
 {
     if (prefix.empty())
@@ -30,7 +30,7 @@ struct gguf_metadata_loader
 
     template<typename T>
     static constexpr T(*gguf_get_val_provider())(const gguf_context*, int64_t)
-    {
+    {   
         if constexpr (std::is_same_v<T, int32_t>)
             return gguf_get_val_i32;
         else if constexpr (std::is_same_v<T, uint32_t>)
@@ -41,12 +41,12 @@ struct gguf_metadata_loader
             return gguf_get_val_f32;
         else static_assert("unsupported type");
     }
-
     template<typename T>
     bool get_metadata(const std::string& prefix, const char* name, T& value) const
     {   
+        std::cout<<"metadata "<<combine_prefix(prefix, name)<<std::endl;
         return get_metadata(combine_prefix(prefix, name).c_str(), value);
-    }   
+    }
 
     template<typename T>
     bool get_metadata(const char* key_name, T& value) const
@@ -105,18 +105,17 @@ struct gguf_loader : gguf_metadata_loader
 
     ggml_tensor* get_gguf_tensor(const std::string& prefix, const char* name, bool optional = false) const
     {
-        std::cout<<combine_prefix(prefix, name)<<std::endl;
         auto tensor = ggml_get_tensor(gguf_ggml_ctx, combine_prefix(prefix, name).c_str());
+        std::cout<<combine_prefix(prefix, name)<<std::endl;
         GGML_ASSERT(optional || tensor);
         return tensor;
     }
 };
 
-
 #define LOAD_SUBMODULE_EX(name, module) do {\
     auto& _module = module;\
     auto _name = combine_prefix(prefix, name);\
-    _module.OnLoad(loader, _name);\
+    _module.onload(loader, _name);\
     this->submodules[std::move(_name)] = &_module;\
 } while (false)
 #define LOAD_SUBMODULE(name) LOAD_SUBMODULE_EX(#name, name)
@@ -137,7 +136,5 @@ struct gguf_loader : gguf_metadata_loader
 
 #define LOAD_METADATA(name) loader.get_metadata(prefix, #name, name)
 #define LOAD_METADATA_NOPREFIX(name) loader.get_metadata(#name, name)
-
-
 
 #endif //  __GGUF_LOADER_H__
