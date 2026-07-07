@@ -134,15 +134,21 @@ void deinit_ggml()
 {
     if(1 == is_init)
     {
+        if(cpu_backend)
+        {
+            if(cpu_backend != backend)
+            {
+                ggml_backend_free(cpu_backend);
+            }
+
+        }
+
         if(backend)
         {
             ggml_backend_free(backend);
         }
 
-        if(cpu_backend)
-        {
-            ggml_backend_free(cpu_backend);
-        }
+    
         backend = nullptr;
         cpu_backend = nullptr;
         is_init = 0;
@@ -153,7 +159,7 @@ void deinit_ggml()
     }
 }
 
-int ggml_model_weight_alloc(ggml_context *ctx, ggml_backend_t dev_backend, ggml_backend_buffer_t &buffer, std::map<std::string, ggml_tensor**> tensors)
+int ggml_model_weight_alloc(ggml_context *ctx, ggml_backend_t dev_backend, ggml_backend_buffer_t &buffer, const std::map<std::string, ggml_tensor**> &tensors)
 {
     auto buft = ggml_backend_get_default_buffer_type(dev_backend);
     auto alignment = ggml_backend_buft_get_alignment(buft);
@@ -356,6 +362,7 @@ void *ggml_model_alloc(const char *model_data, uint64_t model_size,
 
     ggml_handle->n_thread = n_thread;
 
+    //to do gguf_init_from_file 释放问题
     gguf_ctx = gguf_init_from_file(model_data, gguf_params);
     if(!gguf_ctx)
     {
@@ -503,6 +510,8 @@ int main(int argc, char *argv[])
         //usleep(seg_time);
     }while(wav_count > seg_sample + offset);
     }
+
+    free(wav_buf);
 
     ggml_data_free(handle, input_matrix, output_matrix);
     ggml_model_free(handle);

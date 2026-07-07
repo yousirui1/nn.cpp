@@ -1,12 +1,10 @@
 #ifndef __GGML_MODEL_H__
 #define __GGML_MODEL_H__
 
-
 #include <map>
 #include <string>
 #include "matrix.h"
 #include "ggml-backend.h"
-
 
 #define MAX_NUM_LAYER 64 //to do 
                          
@@ -30,8 +28,7 @@ inline static const char *get_tensor_type_string(int type)
             return "Q_K";
     }
 }
-
-                         
+                        
 
 struct ggml_handle_t
 {
@@ -75,6 +72,6 @@ void set_graph_backend(struct ggml_cgraph* gf, ggml_backend_sched_t sched, ggml_
 bool ggml_graph_compute_helper(ggml_backend_sched_t sched, struct ggml_cgraph *graph, int n_threads);
 
 
-int ggml_model_weight_alloc(ggml_context *ctx, ggml_backend_t dev_backend, ggml_backend_buffer_t &buffer, std::map<std::string, ggml_tensor**> tensors);
+int ggml_model_weight_alloc(ggml_context *ctx, ggml_backend_t dev_backend, ggml_backend_buffer_t &buffer, const std::map<std::string, ggml_tensor**> &tensors);
 
 #endif //  __GGML_MODEL_H__

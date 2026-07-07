@@ -2,6 +2,7 @@
 #define __MODEL_LIST_H__
 
 #include "ggml_silero.h"
+#include "ggml_sensevoice.h"
 
 #if 0
 /* vad_silero */
@@ -43,8 +44,8 @@ struct ggml_model_t
 static struct ggml_model_t ggml_models[] =
 {
     //name                  load                    inference                   unload
-    {"SenseVoiceSmall",     load_silero_model,       silero_inference ,         unload_silero_model},
-    //{"SenseVoiceSmall",     load_sensevoice_model,  sensevoice_inference ,      unload_sensevoice_model},
+    //{"SenseVoiceSmall",     load_silero_model,       silero_inference ,         unload_silero_model},
+    {"SenseVoiceSmall",     load_sensevoice_model,  sensevoice_inference ,      unload_sensevoice_model},
     //{"FsmnVADStreaming",    load_fsmn_model,         fsmn_inference,            unload_fsmn_model},
 };
 

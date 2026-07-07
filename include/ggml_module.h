@@ -111,6 +111,70 @@ struct FSMNBlock : Module
     ggml_tensor* build_cgraph(ggml_context* ctx, ggml_tensor* x) const;
 };
 
+struct SinusoidalPositionEncoder : Module
+{
+    ggml_tensor* weight;
 
+    void onload(const gguf_loader &loader, const std::string &prefix);
+    ggml_tensor *build_cgraph(ggml_context *ctx, ggml_tensor *x) const;
+};
+
+struct PositionwiseFeedForward : Module
+{
+    Linear w_1;
+    Linear w_2;
+
+    void onload(const gguf_loader &loader, const std::string &prefix);
+    ggml_tensor *build_cgraph(ggml_context *ctx, ggml_tensor *x) const;
+};
+
+struct MultiHeadedAttentionSANM : Module
+{
+    Linear linear_out;
+    Linear linear_q;
+    Linear linear_k;
+    Linear linear_v;
+
+    Conv1d fsmn_block;
+
+    void onload(const gguf_loader &loader, const std::string &prefix);
+    ggml_tensor *build_cgraph(ggml_context *ctx, ggml_tensor *x) const;
+};
+
+struct EncoderLayerSANM : Module
+{
+    MultiHeadedAttentionSANM self_attn;
+
+    PositionwiseFeedForward feed_forward;
+
+    LayerNorm norm1;
+    LayerNorm norm2;
+
+    void onload(const gguf_loader &loader, const std::string &prefix);
+    ggml_tensor *build_cgraph(ggml_context *ctx, ggml_tensor *x) const;
+};
+
+struct SenseVoiceEncoderSmall : Module
+{
+    SinusoidalPositionEncoder embed;
+
+    EncoderLayerSANM encoders0;
+
+    std::vector<EncoderLayerSANM> encoders;
+    std::vector<EncoderLayerSANM> tp_encoders;
+
+    LayerNorm after_norm;
+    LayerNorm tp_norm;
+
+    void onload(const gguf_loader &loader, int n_encoder_layers, int n_tp_encoder_layers, std::string prefix);
+    ggml_tensor *build_cgraph(ggml_context *ctx, ggml_tensor *x) const;
+};
+
+
+struct CTC : BasicModule
+{
+    void onload(const gguf_loader &loader, const std::string &prefix);
+    ggml_tensor *build_cgraph(ggml_context *ctx, ggml_tensor *x) const;
+};
 
 #endif //  __GGML_MODULE_H__

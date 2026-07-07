@@ -447,5 +447,3 @@ void unload_silero_model(struct ggml_handle_t *ggml_handle)
 
 }
 
-
-

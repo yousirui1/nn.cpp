@@ -1,0 +1,7 @@
+{
+   libcuda_noise
+   Memcheck:Leak
+   ...
+   obj:*/libcuda.so*
+   ...
+}
