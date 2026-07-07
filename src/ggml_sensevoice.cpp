@@ -258,18 +258,24 @@ int load_sensevoice_model(struct ggml_handle_t *ggml_handle, const char *model_d
     //to do cpu ?
     ggml_backend_sched_reset(state->sched);
 
-#if 0
-    ggml_handle->in_nodes = 2;
-    ggml_handle->input_names[0] = strdup("audio_chunk");
-    set_shape(&ggml_handle->input_shape[0], TENSOR_FLOAT32, 1, 640);
-    ggml_handle->input_names[1] = strdup("audio_cache");
-    set_shape(&ggml_handle->input_shape[1], TENSOR_FLOAT32, 1, 512);
+    ggml_handle->in_nodes = 4;
+    ggml_handle->input_names[0] = strdup("speech");
+    set_shape(&ggml_handle->input_shape[0], TENSOR_FLOAT32, 3,  -1, -1, 560);
 
-    ggml_handle->output_names[0] = strdup("logit");
-    ggml_handle->out_nodes = 1;
-    //to do no use
-    set_shape(&ggml_handle->output_shape[0], TENSOR_FLOAT32, 1, params->max_speech_duration_ms * 16);
-#endif
+    ggml_handle->input_names[1] = strdup("speech_lengths");
+    set_shape(&ggml_handle->input_shape[1], TENSOR_INT32, 1, -1);
+
+    ggml_handle->input_names[2] = strdup("language");
+    set_shape(&ggml_handle->input_shape[2], TENSOR_INT32, 1, -1);
+
+    ggml_handle->input_names[3] = strdup("textnorm");
+    set_shape(&ggml_handle->input_shape[3], TENSOR_INT32, 1, -1);
+
+    ggml_handle->out_nodes = 2;
+    ggml_handle->output_names[0] = strdup("ctc_logits");
+    set_shape(&ggml_handle->output_shape[0], TENSOR_FLOAT32, 3, -1, -1, 25055);
+    ggml_handle->output_names[1] = strdup("encoder_out_lens");
+    set_shape(&ggml_handle->output_shape[1], TENSOR_FLOAT32, 1, -1);
 
     ggml_handle->params = (void *)params;
     ggml_handle->model = (void *)model;
