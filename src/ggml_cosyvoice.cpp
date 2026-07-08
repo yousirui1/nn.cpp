@@ -91,6 +91,7 @@ ggml_cgraph *cosyvoice_build_cgraph(struct cosyvoice_model_t *model, struct cosy
 
 int load_cosyvoice_model(struct ggml_handle_t *ggml_handle, const char *model_data, int model_size)
 {
+#if 0
     struct cosyvoice_params_t *params = new cosyvoice_params_t;
     if(NULL == params)
     {
@@ -135,7 +136,6 @@ int load_cosyvoice_model(struct ggml_handle_t *ggml_handle, const char *model_da
         model->ctx = ggml_init(ggml_init_params{ .mem_size = ggml_graph_overhead() * GGML_DEFAULT_GRAPH_SIZE, .no_alloc = true });
 
         model->stft.onload(loader, prefix);
-
 
         //LOG_DEBUG("stft.forward_basis_buffer %p", model->stft.forward_basis_buffer);
 
@@ -243,6 +243,7 @@ int load_cosyvoice_model(struct ggml_handle_t *ggml_handle, const char *model_da
     ggml_handle->out_nodes = 1;
     //to do no use
     set_shape(&ggml_handle->output_shape[0], TENSOR_FLOAT32, 1, params->max_speech_duration_ms * 16);
+#endif
     return SUCCESS;
 }
 

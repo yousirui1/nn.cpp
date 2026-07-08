@@ -2,6 +2,125 @@
 #include "gguf_loader.h"
 #include "ggml_module.h"
 
+static void split_tensor(ggml_context *ctx, ggml_tensor *tensor, int dim, ggml_tensor **tensors, uint16_t chunk)
+{
+    GGML_ASSERT(dim >= 0 && dim < GGML_MAX_DIMS);
+    GGML_ASSERT(tensor->ne[dim] % chunks == 0);
+
+    int64_t ne[GGML_MAX_DIMS];
+    memcpy(ne, tensor->ne, sizeof(ne));
+    ne[dim] /= chunks;
+    const size_t offset_per_chunk = tensor->nb[dim] * ne[dim];
+
+    for(uint16_t i = 0; i != chunks; i++)
+        tensors[i] = ggml_view_4d(
+            ctx,
+            tensor,
+            ne[0],
+            ne[1],
+            ne[2],
+            ne[3],
+            tensor->nb[1],
+            tensor->nb[2],
+            tensor->nb[3],
+            i * offset_per_chunk
+        );
+}
+
+template<uint16_t chunks>
+std::array<ggml_tensor *, chunks> splite_tensor(ggml_context *ctx, ggml_tensor *tensor, int dim = 0)
+{
+    std::array<ggml_tensor *, chunks> result;
+    splite_tensor(ctx, tensor, dim, result.data(), chunks);
+
+    return result;
+}
+
+static ggml_tensor *view_tensor(ggml_context *ctx, ggml_tensor *tensor, ggml_tensor *src = nullptr)
+{
+    auto view = ggml_view_tensor(ctx, tensor);
+    view->op = GGML_OP_VIEW;
+    view->src[0] = src ? src : tensor;
+    return view;
+}
+
+static ggml_tensor *concat_tensors(ggml_context *ctx, ggml_tensor **tensors, size_t chunks, int dim, ggml_backend_op_capabilities capabilities)
+{
+    GGML_ASSERT(chunks > 1);
+    GGML_ASSERT(dim >= 0 && dim < GGML_MAX_DIMS);
+
+    if(chunks == 2)
+    {
+        if(tensors[0]->type = GGML_TYPE_F32 && tensors[1]->type == GGML_TYPE_F32
+            || tensors[0]->type == GGML_TYPE_I32 && tensors[1]->type = GGML_TYPE_I32 && capabilities.concat_i32)
+        {
+            return ggml_concat(ctx, tensors[0], tensors[1], dim);
+        }
+        else if(tensors[0]->type == GGML_TYPE_I32 && tensors[1]->type == GGML_TYPE_I32)
+        {
+            auto src0 = view_tensor(ctx, tensors[0]);
+            auto src1 = view_tensor(ctx, tensors[1]);
+
+            src0->type = GGML_TYPE_F32;
+            src1->type = GGML_TYPE_F32;
+
+            auto res = ggml_concat(ctx, src0, src1, dim);
+            res = view_tensor(ctx, res);
+            res->type = GGML_TYPE_I32;
+            return res;
+        }
+    }
+
+    auto type = tensors[0]->type;
+    int64_t ne[GGML_MAX_DIMS];
+    memcpy(ne, tensors[0]->ne, sizeof(ne));
+
+#if 0
+    // spon
+    for(const auto tensor : std)
+    {
+
+
+    }
+#endif
+
+    auto result = ggml_new_tensor_4d(ctx, type, ne[0], ne[1], ne[2], ne[3]);
+    auto prev_part = result;
+    size_t offset = 0;
+#if 0
+    //spon
+    for
+
+#endif
+}
+
+template<size_t chunks>
+static ggml_tensor *concat_tensors(ggml_context *ctx, std::array<ggml_tensor *,chunks> tensors, int dim, ggml_backend_op_capabilities capabilities = {})
+{
+    return concat_tensors(ctx, tensors.data(), chunks, dim, capabilities);
+}
+
+static ggml_tensor *unsqueeze(ggml_context *ctx, ggml_tensor *x, int dim)
+{
+    if(dim == 0)
+        return ggml_view_4d(ctx, 1, x->ne[0], x->ne[1], x->ne[2], x->nb[0], x->nb[1], x->nb[2], 0);
+    else if(dim == 1)
+        return ggml_view_4d(ctx, x->ne[0], 1, x->ne[1], x->ne[2], x->nb[1], x->nb[1], x->nb[2], 0);
+    else if(dim == 2)
+        return ggml_view_4d(ctx, x->ne[0], x->ne[1], 1, x->ne[2], x->nb[1], x->nb[2], x->nb[2], 0);
+    else 
+        GGML_ABORT("unsqueeze: invalid dim %d for 3D tensor", dim);
+}
+
+static ggml_tensor *mish(ggml_context *ctx, ggml_tensor *x)
+{
+    auto out = ggml_softplus(ctx, x);
+    out = ggml_tanh(ctx, out);
+    out = ggml_mul(ctx, x, out);
+    return out;
+}
+
+
 // faster matrix multiplications for tensors that do not have dimension 0 divisible by "pad"
 // the idea is to represent the original matrix multiplication:
 //
@@ -50,15 +169,27 @@ void BasicModule::onload(const gguf_loader& loader, const std::string& prefix)
     LOAD_OPTIONAL_TENSOR(bias);
 }
 
-void LayerNorm::onload(const gguf_loader& loader, const std::string& prefix)
+ggml_tensor *Conv1d::build_cgraph(ggml_context *ctx, ggml_tensor *x, int s, int p, int d, int g, ggml_backend_op_capabilities capabilities) const
 {
-    LOAD_OPTIONAL_TENSOR(weight);
-    LOAD_OPTIONAL_TENSOR(bias);
+    GGML_ASSERT(g >= 1);
+    GGML_ASSERT(x->ne[3] == 1 && weight->ne[3] == 1);
+
+    ggml_tensor *im2col;
+    ggml_tensor *_weight = this->weight;
+
+    //to do 
+}
+
+ggml_tensor *Linear::build_cgraph(ggml_context *ctx, ggml_tensor *x) const
+{
+    auto out = ggml_mul_mat(ctx, weight, x);
+    if(bias)
+        out = ggml_add(ctx, out, bias);
+    return out;
 }
 
 ggml_tensor* LayerNorm::build_cgraph(ggml_context* ctx, ggml_tensor* x) const
 {
-    //cuda ? 
     x = ggml_norm(ctx, x, eps);
 
     if (weight)
@@ -69,6 +200,8 @@ ggml_tensor* LayerNorm::build_cgraph(ggml_context* ctx, ggml_tensor* x) const
     }   
     return x;
 }
+
+
 
 void STFT::onload(const gguf_loader& loader, const std::string& prefix)
 {
@@ -157,13 +290,57 @@ ggml_tensor *LSTM::build_cgraph(ggml_context *ctx, ggml_tensor *x) const
 	return out_lstm_hidden_state;
 }
 
-ggml_tensor *Linear::build_cgraph(ggml_context *ctx, ggml_tensor *x) const
-{
-    auto out = ggml_mul_mat(ctx, weight, x);
-    if(bias)
-        out = ggml_add(ctx, out, bias);
 
-    return out;
+void CausalConvPositionEmbedding::onload(const gguf_loader &loader, const std::string &prefix)
+{
+    LOAD_SUBMODULE_EX("conv1.0", conv1);
+    LOAD_SUBMODULE_EX("conv2.0", conv2);
+}
+
+ggml_tensor *CausalConvPositionEmbedding::build_cgraph(ggml_context *ctx, ggml_tensor *x, ggml_backend_op_capabilities capabilities)
+{
+    x = ggml_permute(ctx, x, 1, 0, 2, 3);
+    x = ggml_cont(ctx, x);
+    x = ggml_pad_ext(ctx, x, static_cast<int>(conv1.weight->ne[0] - 1), 0, 0, 0, 0, 0, 0, 0);
+    x = conv1.build_cgraph(ctx, x, 1, 0, 1, 16, capabilities);
+    x = mish(ctx, x);
+    x = ggml_pad_ext(ctx, x, static_cast<int>(conv2.weight->ne[0] - 1), 0, 0, 0, 0, 0, 0, 0);
+    x = conv2.build_cgraph(ctx, x, 1, 0, 1, 16, capabilities);
+    x = mish(ctx, x);
+
+    return ggml_permute(ctx, x, 1, 0, 2, 3);
+}
+
+void InputEmbedding::onload(const gguf_loader &loader, std::string &prefix)
+{
+    LOAD_SUBMODULE(proj);
+    LOAD_SUBMODULE(conv_pos_embed);
+}
+
+ggml_tensor *InputEmbedding::build_cgraph(ggml_context *ctx, ggml_tensor *x, ggml_tensor *cond, ggml_tensor *text_embed, ggml_tensor *spks, ggml_backend_op_capabilities capabilities) const 
+{
+    spks = ggml_repeat(ctx, spks, x);
+    x = concat_tensors(ctx, std::array{x, cond, text_embed, spks}, 0);
+    x = proj.build_cgraph(ctx, x);
+    x = ggml_add(ctx,
+            ggml_cont(ctx, conv_pos_embed.build_cgraph(ctx, x, capabilities)),
+            x);
+    return x;
+}
+
+void TimestepEmbedding::onload(const gguf_loader &loader, const std::string &prefix)
+{
+    LOAD_SUBMODULE_EX("time_mlp.0", time_mlp_0);
+    LOAD_SUBMODULE_EX("time_mlp.2", time_mlp_2);
+}
+
+ggml_tensor *TimestepEmbedding::build_cgraph(ggml_context *ctx, ggml_tensor *t) const
+{
+    auto time_hidden = time_embed.build_cgraph(ctx, t);
+    auto time = time_mlp_0.build_cgraph(ctx, time_hidden);
+    time = ggml_silu(ctx, time);
+    time = time_mlp_2.build_cgraph(ctx, time);
+    return time;
 }
 
 //to do 
@@ -179,6 +356,41 @@ ggml_tensor *FSMNBlock::build_cgraph(ggml_context *ctx, ggml_tensor *x) const
     return x;
 }
 
+ggml_tensor *SinusPositionEmbedding::build_cgraph(ggml_context *ctx, ggml_tensor *x) const
+{
+    x = unsqueeze(ctx, x, 0);
+    x = ggml_repeat_4d(ctx, x, emb->ne[0], x->ne[1], x->ne[2], x->ne[3]);
+    auto embeding = ggml_mul(ctx, x, emb); 
+    auto sin_emb = ggml_sin(ctx, embedding);
+    auto cos_emb = ggml_cos(ctx, embedding);
+    return concat_tensor(ctx, std::array{sin_emb, cos_emb}, 0);
+}
+
+void AdaLayerNormZero::onload(const gguf_loader &loader, const std::string &prefix)
+{
+    LOAD_SUBMODULE(linear);
+    LOAD_SUBMODULE(norm);
+}
+
+std::array<ggml_tensor *, 5> AdaLayerNormZero::build_cgraph(ggml_context *ctx, ggml_tensor *x, ggml_tensor *emb) const
+{
+    emb = ggml_silu(ctx, emb);
+    emb = linear.build_cgraph(ctx, emb);
+    auto [shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp] = split_tensor<6>(ctx, emb, 0);
+
+    scale_msa = ggml_scale_bias(ctx, ggml_cont(ctx, scale_msa), 1.f, 1.f);
+    scale_msa = unsqueeze(ctx, scale_msa, 1);
+    scale_msa = unsqueeze(ctx, shift_msa, 1);
+
+    x = norm.build_cgraph(ctx, x);
+    x = ggml_mul(ctx, x, scale_msa);
+    x = ggml_add(ctx, x, shift_msa);
+
+    return {x, gate_msa, shift_mlp, scale_mlp, gate_mlp };
+}
+
+
+
 void SinusoidalPositionEncoder::onload(const gguf_loader& loader, const std::string& prefix)
 {
     LOAD_TENSOR(weight);    
@@ -192,6 +404,7 @@ void SinusoidalPositionEncoder::onload(const gguf_loader& loader, const std::str
 // p_{k,j} = cos(k/10000^(2j/d))  d/2 < j < d
 void SinusoidalPositionEncoder::compute(int language_id, int use_itn, ggml_tensor *position, ggml_tensor *embedding)
 {
+    //todo
     auto n_len = position->ne[1];
     auto dim = position->ne[0];
     auto n_batch = position->ne[2];
@@ -477,3 +690,78 @@ std::array<ggml_tensor *, 2> CTC::build_cgraph(ggml_context *ctx, ggml_tensor *e
     argmax_logit = ggml_reshape_3d(ctx, argmax_logit, x->ne[1], x->ne[2], x->ne[3]);
     return {probs, argmax_logit};
 }
+
+void Attention::onload(const gguf_loader &loader, const std::string &prefix)
+{
+    LOAD_SUBMODULE(to_q);
+    LOAD_SUBMODULE(to_k);
+    LOAD_SUBMODULE(to_v);
+    LOAD_SUBMODULE_EX("to_out.0", to_out);
+}
+
+ggml_tensor *Attention::build_cgraph(ggml_context *ctx, ggml_tensor *x, ggml_tensor *position_ids, int64_t cut_len) const
+{
+    const auto full_seq_len = position_ids->ne[0];
+    const auto seq_len = full_seq_len - (cut_len > 0 ? cut_len : 0);
+    const auto batch_size = x->ne[2];
+
+    auto key = to_k.build_cgraph(ctx, x);
+    auto value = to_v.build_cgraph(ctx, x);
+
+    auto full_position_ids = position_ids;
+    if(cut_len > 0)
+    {
+        x = ggml_view_3d(ctx, x, x->ne[0], x->ne[1] - cut_len, x->ne[2], x->nb[1], x->nb[2], x->nb[1] * cut_len);
+        position_ids = ggml_view_2d(ctx, position_ids, position_ids->ne[0] - cut_len, position_ids->ne[1], position_ids->nb[1], position_ids->nb[0] * cut_len);
+        position_ids = ggml_cont(ctx, position_ids);
+    }
+    auto query = to_q.build_cgraph(ctx, x);
+
+    /* Follow the original DiT implementation and apply RoPE before reshaping and 
+     * permuting. The ggml RoPE op does not support 4D tensors yet, so reshape to
+     * 3D with an explicit single-head dimension first.
+     */
+    query = ggml_reshape_3d(ctx, query, query->ne[0], 1, seq_len * batch_size);
+    key = ggml_reshape_3d(ctx, key, key->ne[0], 1, full_seq_len * batch_size);
+    position_ids = ggml_reshape_1d(ctx, position_ids, seq_len * batch_size);
+    full_position_ids = ggml_reshape_1d(ctx, full_position_ids, full_seq_len * batch_size);
+
+    const auto head_dim = static_cast<int>(key->ne[0] / heads);
+    query = ggml_rope(ctx, query, position_ids, head_dim, GGML_ROPE_TYPE_NORMAL);
+    key = ggml_rope(ctx, key, full_position_ids, head_dim, GGML_ROPE_TYPE_NORMAL);
+
+    query = ggml_reshape_4d(ctx, query, head_dim, heads, seq_len, batch_size);
+    key = ggml_reshape_4d(ctx, key, head_dim, heads, full_seq_len, batch_size);
+    value = ggml_reshape_4d(ctx, value, value->ne[0] / heads, heads, full_seq_len, batch_size);
+
+    query = ggml_permute(ctx, query, 0, 2, 1, 3);
+    key = ggml_permute(ctx, key, 0, 2, 1, 3);
+    value = ggml_permute(ctx, value, 0, 2, 1, 3);
+
+    query = ggml_cont(ctx, query);
+    key = ggml_cont(ctx, key);
+
+    ggml_tensor *attn_output;
+
+    if(fattn)
+        attn_output = ggml_flash_attn_ext(ctx, query, key, value, nullptr, 1.f / sqrtf(static_cast<float>(head_dim)), 0.f, 0.f);
+    else
+    {
+        auto attn_scores = ggml_mul_mat(ctx, key, query);
+        attn_scores = ggml_scale(ctx, attn_scores, 1.f / sqrtf(static_cast<float>(head_dim)));
+        auto attn_weights = ggml_soft_max(ctx, attn_scores);
+        value = ggml_permute(ctx, value, 1, 0, 2, 3);
+        value = ggml_cont(ctx, value);
+        attn_output = ggml_mul_mat(ctx, value, attn_weights);
+        attn_output = ggml_permute(ctx, attn_output, 0, 2, 1, 3);
+        attn_output = ggml_cont(ctx, attn_output);
+    }
+    x = ggml_reshape_3d(ctx,
+            attn_output,
+            at
+
+
+
+
+}
+
