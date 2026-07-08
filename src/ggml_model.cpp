@@ -458,7 +458,38 @@ void ggml_model_free(void *handle)
     free(ggml_handle);
 }
 
+int main(int argc, char *argv[])
+{
+    int in_nodes, out_nodes;
+    shape_t input_shape[MAX_NUM_LAYER];
+    shape_t output_shape[MAX_NUM_LAYER];
 
+    matrix_t *input_matrix[MAX_NUM_LAYER];
+    matrix_t *output_matrix[MAX_NUM_LAYER];
+
+    void *handle = NULL;
+    char *model_path = "/home/ysr/project/models/gguf/Fun-CosyVoice3-0.5B-2512-GGUF/CosyVoice3-2512_F32.gguf";
+    if(argc > 1)
+    {   
+        model_path = argv[1];
+    }   
+
+    handle = ggml_model_alloc(model_path, 0, input_shape, &in_nodes, output_shape, &out_nodes, 1, NULL);
+
+    ggml_data_alloc(handle, in_nodes, input_shape, input_matrix, 1,
+                    out_nodes, output_shape, output_matrix, 1);
+
+
+    ggml_inference(handle, input_matrix, output_matrix, 1);
+
+    ggml_data_free(handle, input_matrix, output_matrix);
+    ggml_model_free(handle);
+    deinit_ggml();
+    return SUCCESS;
+}
+
+
+#if 0
 int main(int argc, char *argv[])
 {
     int in_nodes, out_nodes;
@@ -518,3 +549,4 @@ int main(int argc, char *argv[])
     deinit_ggml();
     return SUCCESS;
 }
+#endif

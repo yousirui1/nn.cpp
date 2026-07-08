@@ -35,7 +35,7 @@ else
 LIB_PATHS +=
 endif
 
-LIBS = ggml ggml-base ggml-cpu ggml-cuda llama mtmd
+LIBS = ggml ggml-base ggml-cpu #ggml-cuda llama mtmd
 
 STATIC_LIBS =
 

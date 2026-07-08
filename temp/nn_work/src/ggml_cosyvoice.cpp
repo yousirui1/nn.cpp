@@ -116,8 +116,6 @@ int load_cosyvoice_model(struct ggml_handle_t *ggml_handle, const char *model_pa
     set_shape(&output_shape[0], TENSOR_FLOAT32, 1, 16000 * 60); //60s
 
     return SUCCESS;
-
-
 }
 
 
