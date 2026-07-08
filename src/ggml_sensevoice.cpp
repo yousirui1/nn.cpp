@@ -63,6 +63,8 @@ ggml_cgraph *sensevoice_build_cgraph(struct sensevoice_model_t *model, struct se
         .no_alloc   = true,
     };
 
+    int flash_attn = 1;
+
     if(state->ctx_build)
         ggml_free(state->ctx_build);
 
@@ -79,7 +81,7 @@ ggml_cgraph *sensevoice_build_cgraph(struct sensevoice_model_t *model, struct se
     ggml_set_input(input);
 
     //hparam to do 
-    ggml_tensor *x = model->encoder.build_cgraph(state->ctx_build, input);
+    ggml_tensor *x = model->encoder.build_cgraph(state->ctx_build, input, hparams->fsmn_kernel_size, flash_attn);
 
     auto [probs, argmax_logit]  = model->ctc.build_cgraph(state->ctx_build, x);
 
@@ -193,7 +195,7 @@ int load_sensevoice_model(struct ggml_handle_t *ggml_handle, const char *model_d
         gguf_loader loader(model_data);
         model->ctx = ggml_init(ggml_init_params{ .mem_size = ggml_graph_overhead() * GGML_DEFAULT_GRAPH_SIZE, .no_alloc = true });
 
-        model->encoder.onload(loader, params->n_encoder_layers, params->n_tp_encoder_layers, prefix);
+        model->encoder.onload(loader, prefix);
         model->ctc.onload(loader, "ctc.ctc_lo");
 
         auto tensors = model->encoder.get_all_tensors();

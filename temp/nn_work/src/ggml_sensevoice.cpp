@@ -605,10 +605,12 @@ ggml_cgraph *sensevoice_build_cgraph_encoder(struct sensevoice_model_t *model, s
                                       model->encoder->e_after_norm_w),
                        model->encoder->e_after_norm_b);
     }
+
     // tp encoders forward
     for (int i=0; i < hparams->n_tp_encoder_layers; i++){
         cur = encoder_layer_sanm_forward(*hparams,  state, ctx0, cur, model->encoder->tp_encoders_layer[i], gf, flash_attn);
     }
+
     {
         // tp encoder norm
         cur = ggml_norm(ctx0, cur, hparams->eps);

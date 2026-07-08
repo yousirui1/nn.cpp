@@ -44,7 +44,7 @@ struct gguf_metadata_loader
     template<typename T>
     bool get_metadata(const std::string& prefix, const char* name, T& value) const
     {   
-        std::cout<<"metadata "<<combine_prefix(prefix, name)<<std::endl;
+        //std::cout<<"metadata "<<combine_prefix(prefix, name)<<std::endl;
         return get_metadata(combine_prefix(prefix, name).c_str(), value);
     }
 
@@ -106,7 +106,7 @@ struct gguf_loader : gguf_metadata_loader
     ggml_tensor* get_gguf_tensor(const std::string& prefix, const char* name, bool optional = false) const
     {
         auto tensor = ggml_get_tensor(gguf_ggml_ctx, combine_prefix(prefix, name).c_str());
-        std::cout<<combine_prefix(prefix, name)<<std::endl;
+        //std::cout<<combine_prefix(prefix, name)<<std::endl;
         GGML_ASSERT(optional || tensor);
         return tensor;
     }

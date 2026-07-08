@@ -179,7 +179,6 @@ ggml_tensor *FSMNBlock::build_cgraph(ggml_context *ctx, ggml_tensor *x) const
     return x;
 }
 
-
 void SinusoidalPositionEncoder::onload(const gguf_loader& loader, const std::string& prefix)
 {
     LOAD_TENSOR(weight);    
@@ -252,6 +251,9 @@ void PositionwiseFeedForward::onload(const gguf_loader& loader, const std::strin
 
 ggml_tensor *PositionwiseFeedForward::build_cgraph(ggml_context *ctx, ggml_tensor *x) const
 {
+    x = ggml_add(ctx, ggml_mul_mat(ctx, w_1.weight, x), w_1.bias);
+    x = ggml_relu(ctx, x);
+    x = ggml_add(ctx, ggml_mul_mat(ctx, w_2.weight, x), w_2.bias);
     return x;
 }
 
@@ -266,8 +268,84 @@ void MultiHeadedAttentionSANM::onload(const gguf_loader& loader, const std::stri
     LOAD_SUBMODULE(fsmn_block);
 }
 
-ggml_tensor *MultiHeadedAttentionSANM::build_cgraph(ggml_context *ctx, ggml_tensor *x) const
+// self attention linear qkv
+//      cur = ggml_transpose(ctx0, cur);
+// split qkv into separate tensors
+// q, k, v = torch.split(q_k_v, int(self.h * self.d_k), dim=-1)
+//  ref:
+//  https://github.com/alibaba-damo-academy/FunASR/blob/main/funasr/modules/attention.py#L391-L396
+ggml_tensor *MultiHeadedAttentionSANM::build_cgraph(ggml_context *ctx, ggml_tensor *x, int n_hidden_state, int n_head, int fsmn_kerenl_size, int flash_attn) const
 {
+    ggml_tensor *Q, *Q_h;
+    ggml_tensor *K, *K_h;
+    ggml_tensor *V, *V_h;
+
+    int n_ctx = x->ne[1];
+    int n_batch = x->ne[2];
+
+    Q = ggml_add(ctx, ggml_mul_mat_pad(ctx, linear_q.weight, x), linear_q.bias);
+    Q_h = ggml_reshape_4d(ctx, Q, n_hidden_state / n_head, n_head, n_ctx, n_batch);
+    Q_h = ggml_permute(ctx, Q_h, 0, 2, 1, 3);
+    Q_h = ggml_cont(ctx, Q_h);
+    ggml_set_name(Q_h, "attention_Q");
+
+    K = ggml_add(ctx, ggml_mul_mat(ctx, linear_k.weight, x), linear_k.bias);
+    K_h = ggml_reshape_4d(ctx, K, n_hidden_state / n_head, n_head, n_ctx, n_batch);
+    K_h = ggml_permute(ctx, K_h, 0, 2, 1, 3);
+    K_h = ggml_cont(ctx, K_h);
+    ggml_set_name(K_h, "attention_K");
+
+    V = ggml_add(ctx, ggml_mul_mat(ctx, linear_v.weight, x), linear_v.bias);
+    V_h = ggml_reshape_4d(ctx, V, n_hidden_state / n_head, n_head, n_ctx, n_batch);
+    V_h = ggml_permute(ctx, V_h, 0, 2, 1, 3);
+    V_h = ggml_cont(ctx, V_h);
+    ggml_set_name(Q_h, "attention_V");
+
+    /* fsmn forward with V */
+    int padding = (fsmn_kerenl_size - 1) / 2;
+    ggml_tensor *fsmn_memory = nullptr;
+    // conv depth wise to do 
+    {
+        // implement conv depth wise with groups=input_channel implement
+        // same in pytorch : F.conv1d(input, weight, bias=None, stride=1, padding=1, dilation=1, grous=n_stae)
+        {
+            ggml_tensor *a = fsmn_block.weight;
+            ggml_tensor *b = ggml_cont(ctx, ggml_transpose(ctx, V));
+
+            ggml_tensor *im2col = ggml_im2col(ctx, a, ggml_reshape_4d(ctx, b, b->ne[0], 1, b->ne[1] * b->ne[2], b->ne[3]), 1, 0, padding, 0, 1, 0, false, GGML_TYPE_F32);
+            im2col = ggml_reshape_4d(ctx, im2col, im2col->ne[0], im2col->ne[1], im2col->ne[2] / n_batch, n_batch);
+            a = ggml_repeat(ctx, ggml_cast(ctx, a, GGML_TYPE_F32), ggml_new_tensor_4d(ctx, GGML_TYPE_F16, a->ne[0], a->ne[1], a->ne[2], n_batch));
+            ggml_tensor *result = ggml_mul_mat(ctx, a, im2col);
+            fsmn_memory = ggml_reshape_3d(ctx, result, im2col->ne[1], im2col->ne[2], im2col->ne[3]);
+        }
+        fsmn_memory = ggml_cont(ctx, ggml_transpose(ctx, fsmn_memory));
+        fsmn_memory = ggml_add(ctx, fsmn_memory, V);
+        ggml_set_name(fsmn_memory, "fsmn_memory");
+    }
+    float KQscale = 1.0f / sqrt(float(n_hidden_state) / n_head);
+
+    if(flash_attn)
+    {
+        //kv_cache .... to do 
+    }
+    else
+    {
+        // K * Q
+        ggml_tensor *KQ = ggml_mul_mat(ctx, K_h, Q_h);
+        ggml_tensor *KQ_soft_max = ggml_soft_max_ext(ctx, KQ, nullptr, KQscale, 0.0f);
+
+        ggml_tensor *KQV = ggml_mul_mat(ctx, ggml_cont(ctx, ggml_transpose(ctx, V_h)), KQ_soft_max);
+
+        ggml_tensor *KQV_merged = ggml_permute(ctx, KQV, 0, 2, 1, 3);
+
+        x = ggml_cpy(ctx, KQV_merged, ggml_new_tensor_3d(ctx, GGML_TYPE_F32, n_hidden_state, n_ctx, n_batch));
+    }
+    x = ggml_add(ctx, ggml_mul_mat(ctx, linear_out.weight, x), linear_out.bias);
+
+    ggml_set_name(x, "attention_out");
+
+    x = ggml_add(ctx, x, fsmn_memory);
+
     return x;
 }
 
@@ -281,7 +359,7 @@ void EncoderLayerSANM::onload(const gguf_loader& loader, const std::string& pref
     LOAD_SUBMODULE(norm2);
 }
 
-ggml_tensor *EncoderLayerSANM::build_cgraph(ggml_context *ctx, ggml_tensor *x) const
+ggml_tensor *EncoderLayerSANM::build_cgraph(ggml_context *ctx, ggml_tensor *x, int n_hidden_state, int n_head, int fsmn_kernel_size, int flash_attn) const
 {
     ggml_tensor *residual = nullptr;
 
@@ -291,7 +369,12 @@ ggml_tensor *EncoderLayerSANM::build_cgraph(ggml_context *ctx, ggml_tensor *x) c
     }
 
     x = norm1.build_cgraph(ctx, x);
-    //x = self_attn.build_cgraph(ctx, x);
+    x = self_attn.build_cgraph(ctx, x, n_hidden_state, n_head, fsmn_kernel_size, flash_attn);
+
+    if(norm1.weight->ne[0] == norm2.weight->ne[0])
+    {
+        x = ggml_add(ctx, x, residual);
+    }
 
     residual = ggml_cpy(
             ctx, x,
@@ -305,11 +388,24 @@ ggml_tensor *EncoderLayerSANM::build_cgraph(ggml_context *ctx, ggml_tensor *x) c
     return x;
 }
 
-void SenseVoiceEncoderSmall::onload(const gguf_loader &loader, int n_encoder_layers, int n_tp_encoder_layers, std::string prefix)
+void SenseVoiceEncoderSmall::onload(const gguf_loader &loader, std::string prefix)
 {
-    //read meata gguf 
     prefix="";
     LOAD_SUBMODULE(embed);
+
+    //to do 
+    prefix="encoder";
+    LOAD_METADATA(output_size);
+    LOAD_METADATA(linear_units);
+    LOAD_METADATA(attention_heads);
+    LOAD_METADATA(num_blocks);
+    LOAD_METADATA(tp_blocks);
+
+    LOAD_SUBMODULE(after_norm);
+    LOAD_SUBMODULE(tp_norm);
+
+    LOG_DEBUG("SenseVoiceEncoderSmall output_size %d linear_units %d attention_heads %d num_blocks %d tp_blocks %d ", output_size, linear_units, attention_heads, num_blocks, tp_blocks);
+
     prefix = "encoder.encoders0";
     for(int i = 0; i < 1; i++)
     {
@@ -317,41 +413,43 @@ void SenseVoiceEncoderSmall::onload(const gguf_loader &loader, int n_encoder_lay
     }
 
     prefix = "encoder.encoders";
-    encoders.resize(n_encoder_layers - 1);
-    for(int i = 0; i < n_encoder_layers - 1; i++)
+    encoders.resize(num_blocks - 1);
+    for(int i = 0; i < num_blocks - 1; i++)
     {
         LOAD_SUBMODULE_EX(std::to_string(i).c_str(), encoders[i]);
     }
 
     prefix = "encoder.tp_encoders";
-    tp_encoders.resize(n_tp_encoder_layers);
-    for(int i = 0; i < n_tp_encoder_layers; i++)
+    tp_encoders.resize(tp_blocks);
+    for(int i = 0; i < tp_blocks; i++)
     {
         LOAD_SUBMODULE_EX(std::to_string(i).c_str(), tp_encoders[i]);
     }
-
-    prefix = "encoder";
-    LOAD_SUBMODULE(after_norm);
-    LOAD_SUBMODULE(tp_norm);
 }
 
-ggml_tensor *SenseVoiceEncoderSmall::build_cgraph(ggml_context *ctx, ggml_tensor *x) const
+ggml_tensor *SenseVoiceEncoderSmall::build_cgraph(ggml_context *ctx, ggml_tensor *x, int fsmn_kernel_size, int flash_attn) const
 {
     // [x] 1. sinusoidal position
     // [x] 2. encoders0
     // [x] 3. encoders
     // [x] 4. tp_encoders
     // [x] 5. tp_norm
+    x = embed.build_cgraph(ctx, x, output_size);
 
-    //hparams
-    x = embed.build_cgraph(ctx, x, 1);
+    x = encoders0.build_cgraph(ctx, x, output_size, attention_heads, fsmn_kernel_size, flash_attn);
 
-    x = encoders0.build_cgraph(ctx, x, flash_attn);
+    for(int i = 0; i < num_blocks - 1; i++)
+    {
+        x = encoders[i].build_cgraph(ctx, x, output_size, attention_heads, fsmn_kernel_size, flash_attn);
+    }
+    x = after_norm.build_cgraph(ctx, x);
 
-#if 0
-    x = encoders0.build_cgraph(ctx, x, flash_attn);
-    x = encoders0.build_cgraph(ctx, x, flash_attn);
-#endif
+    for(int i = 0; i < tp_blocks; i++)
+    {
+        x = tp_encoders[i].build_cgraph(ctx, x, output_size, attention_heads, fsmn_kernel_size, flash_attn);
+    }
+    x = tp_norm.build_cgraph(ctx, x);
+
     return x;
 }
 

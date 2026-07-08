@@ -14,7 +14,6 @@
 
 struct gguf_loader;
 
-
 struct ggml_backend_op_capabilities_t
 {
     bool concat_i32 : 1;
@@ -140,7 +139,7 @@ struct MultiHeadedAttentionSANM : Module
     Conv1d fsmn_block;
 
     void onload(const gguf_loader &loader, const std::string &prefix);
-    ggml_tensor *build_cgraph(ggml_context *ctx, ggml_tensor *x) const;
+    ggml_tensor *build_cgraph(ggml_context *ctx, ggml_tensor *x, int n_hidden_state, int n_head, int fsmn_kerenl_size, int flash_attn) const;
 };
 
 struct EncoderLayerSANM : Module
@@ -153,12 +152,11 @@ struct EncoderLayerSANM : Module
     LayerNorm norm2;
 
     void onload(const gguf_loader &loader, const std::string &prefix);
-    ggml_tensor *build_cgraph(ggml_context *ctx, ggml_tensor *x) const;
+    ggml_tensor *build_cgraph(ggml_context *ctx, ggml_tensor *x, int n_hidden_state, int n_head, int fsmn_kerenl_size, int flash_attn) const;
 };
 
 struct SenseVoiceEncoderSmall : Module
 {
-    int vocab_size;
     int output_size;
     int linear_units;
     int attention_heads;
@@ -175,8 +173,8 @@ struct SenseVoiceEncoderSmall : Module
     LayerNorm after_norm;
     LayerNorm tp_norm;
 
-    void onload(const gguf_loader &loader, int n_encoder_layers, int n_tp_encoder_layers, std::string prefix);
-    ggml_tensor *build_cgraph(ggml_context *ctx, ggml_tensor *x) const;
+    void onload(const gguf_loader &loader, std::string prefix);
+    ggml_tensor *build_cgraph(ggml_context *ctx, ggml_tensor *x, int fsmn_kernel_size, int flash_attn) const;
 };
 
 
