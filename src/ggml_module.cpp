@@ -50,7 +50,6 @@ void BasicModule::onload(const gguf_loader& loader, const std::string& prefix)
     LOAD_OPTIONAL_TENSOR(bias);
 }
 
-
 void LayerNorm::onload(const gguf_loader& loader, const std::string& prefix)
 {
     LOAD_OPTIONAL_TENSOR(weight);
@@ -59,6 +58,7 @@ void LayerNorm::onload(const gguf_loader& loader, const std::string& prefix)
 
 ggml_tensor* LayerNorm::build_cgraph(ggml_context* ctx, ggml_tensor* x) const
 {
+    //cuda ? 
     x = ggml_norm(ctx, x, eps);
 
     if (weight)
@@ -69,8 +69,6 @@ ggml_tensor* LayerNorm::build_cgraph(ggml_context* ctx, ggml_tensor* x) const
     }   
     return x;
 }
-
-
 
 void STFT::onload(const gguf_loader& loader, const std::string& prefix)
 {
@@ -187,64 +185,64 @@ void SinusoidalPositionEncoder::onload(const gguf_loader& loader, const std::str
     LOAD_TENSOR(weight);    
 }
 
+// construct position embedding
+// sinusoidal position embedding
+// reference:
 //https://github.com/modelscope/FunASR/blob/45d7aa9004763684fb748ee17942ecba81042201/funasr/models/transformer/embedding.py#L392-L405
 // P_{k,i} = sin(k/10000^(2i/d))  0 < i < d/2
 // p_{k,j} = cos(k/10000^(2j/d))  d/2 < j < d
-ggml_tensor *SinusoidalPositionEncoder::build_cgraph(ggml_context *ctx, ggml_tensor *x) const
+void SinusoidalPositionEncoder::compute(int language_id, int use_itn, ggml_tensor *position, ggml_tensor *embedding)
 {
-#if 0
-    struct ggml_tensor *embedding = ggml_new_tensor_2d(ctx0, GGML_TYPE_I32, 4, 1);
+    auto n_len = position->ne[1];
+    auto dim = position->ne[0];
+    auto n_batch = position->ne[2];
+    std::vector<float> _position;
+    _position.resize(n_len * dim * n_batch);
+
+    //SIMD to do 
+    for(int b = 0; b < n_batch; b++)
+    {
+        for(int k = 1; k <= n_len; k++)
+        {
+            for(int i = 0; i < dim / 2; i++)
+            {
+                _position[b * n_len * dim + (k - 1) * dim + i ] = 
+                            sinf(k * pow(10000, -2.0 * i / dim));
+
+                _position[b * n_len * dim + (k - 1) * dim + i  + dim / 2] = 
+                            cosf(k * pow(10000, -2.0 * i / dim));
+            }
+        }
+    }
+    ggml_backend_tensor_set(
+            position, _position.data(), 0,
+            ggml_nelements(position) * sizeof(float));
+
+    int _embedding[4] = {language_id, 1, 2, use_itn ? 14 : 15}; 
+    ggml_backend_tensor_set(embedding, _embedding, 0, 4 * sizeof(int));
+}
+
+ggml_tensor *SinusoidalPositionEncoder::build_cgraph(ggml_context *ctx, ggml_tensor *feature, int n_hidden_state) const
+{
+    ggml_tensor *embedding = ggml_new_tensor_2d(ctx, GGML_TYPE_I32, 4, 1);
     ggml_set_name(embedding, "embedding");
     ggml_set_input(embedding);
 
-    embedding = ggml_get_rows(ctx0, model->embedding, embedding);
-    embedding = ggml_repeat(ctx0, embedding, ggml_new_tensor_3d(ctx0, GGML_TYPE_I32, embedding->ne[0], embedding->ne[1], feature->ne[2]));
+    embedding = ggml_get_rows(ctx, weight, embedding);
+    embedding = ggml_repeat(ctx, embedding, ggml_new_tensor_3d(ctx, GGML_TYPE_I32, embedding->ne[0], embedding->ne[1], feature->ne[2]));
 
-    struct ggml_tensor *cur = ggml_concat(ctx0, embedding, feature, 1);
+    ggml_tensor *x = ggml_concat(ctx, embedding, feature, 1);
 
-    cur = ggml_scale(ctx0, cur, sqrtf(hparams->n_encoder_hidden_state));
+    x = ggml_scale(ctx, x, sqrt(n_hidden_state));
 
-    ggml_tensor *position = ggml_new_tensor_3d(ctx0, cur->type, cur->ne[0], cur->ne[1], cur->ne[2]);
+    ggml_tensor *position = ggml_new_tensor_3d(ctx, x->type, x->ne[0], x->ne[1], x->ne[2]);
     ggml_set_name(position, "position");
     ggml_set_input(position);
-#endif
 
-#if 0
-        struct ggml_tensor *position = ggml_graph_get_tensor(gf, "position");
-        struct ggml_tensor *embedding = ggml_graph_get_tensor(gf, "embedding");
+    x = ggml_add(ctx, position, x);
 
-        auto n_len = position->ne[1];
-        auto dim = position->ne[0];
-        auto n_batch = position->ne[2];
-        std::vector<float> _position;
-        _position.resize(n_len * dim * n_batch);
-        // construct position embedding
-        // sinusoidal position embedding
-        // reference:
-        // https://github.com/modelscope/FunASR/blob/45d7aa9004763684fb748ee17942ecba81042201/funasr/models/transformer/embedding.py#L392-L405
-
-        for (int b = 0; b < n_batch; b++)
-        for (int k = 1; k <= n_len; k++) {
-            for (int i = 0; i < dim / 2; i++) {
-            _position[b * n_len * dim + (k - 1) * dim + i] = sinf(k * pow(10000, -2.0 * i / dim));
-            _position[b * n_len * dim + (k - 1) * dim + i + dim / 2] =
-                    cosf(k * pow(10000, -2.0 * i / dim));
-            }
-        }
-
-
-        ggml_backend_tensor_set(
-                position, _position.data(), 0,
-                ggml_nelements(position) * sizeof(float));
-
-        int _embedding[4] = {hparams->language_id, 1, 2, hparams->use_itn ? 14 : 15};
-        bool use_itn = false;
-        //int _embedding[4] = {0, 1, 2, use_itn ? 14 : 15};
-        ggml_backend_tensor_set(embedding, _embedding, 0, 4*sizeof(int));
-#endif 
     return x;
 }
-
 
 void PositionwiseFeedForward::onload(const gguf_loader& loader, const std::string& prefix)
 {
@@ -281,17 +279,35 @@ void EncoderLayerSANM::onload(const gguf_loader& loader, const std::string& pref
 
     LOAD_SUBMODULE(norm1);
     LOAD_SUBMODULE(norm2);
-
 }
 
 ggml_tensor *EncoderLayerSANM::build_cgraph(ggml_context *ctx, ggml_tensor *x) const
 {
+    ggml_tensor *residual = nullptr;
 
+    if(norm1.weight->ne[0] == norm2.weight->ne[0])
+    {
+        residual = ggml_cpy(ctx, x, ggml_new_tensor_3d(ctx, x->type, x->ne[0], x->ne[1], x->ne[2]));
+    }
+
+    x = norm1.build_cgraph(ctx, x);
+    //x = self_attn.build_cgraph(ctx, x);
+
+    residual = ggml_cpy(
+            ctx, x,
+            ggml_new_tensor_3d(ctx, GGML_TYPE_F32, x->ne[0], x->ne[1], x->ne[2]));
+
+    x = norm2.build_cgraph(ctx, x);
+    x = feed_forward.build_cgraph(ctx, x);
+
+    // residual after position wise feed forward
+    x = ggml_add(ctx, x, residual);
     return x;
 }
 
 void SenseVoiceEncoderSmall::onload(const gguf_loader &loader, int n_encoder_layers, int n_tp_encoder_layers, std::string prefix)
 {
+    //read meata gguf 
     prefix="";
     LOAD_SUBMODULE(embed);
     prefix = "encoder.encoders0";
@@ -319,8 +335,23 @@ void SenseVoiceEncoderSmall::onload(const gguf_loader &loader, int n_encoder_lay
     LOAD_SUBMODULE(tp_norm);
 }
 
-ggml_tensor * SenseVoiceEncoderSmall::build_cgraph(ggml_context *ctx, ggml_tensor *x) const
+ggml_tensor *SenseVoiceEncoderSmall::build_cgraph(ggml_context *ctx, ggml_tensor *x) const
 {
+    // [x] 1. sinusoidal position
+    // [x] 2. encoders0
+    // [x] 3. encoders
+    // [x] 4. tp_encoders
+    // [x] 5. tp_norm
+
+    //hparams
+    x = embed.build_cgraph(ctx, x, 1);
+
+    x = encoders0.build_cgraph(ctx, x, flash_attn);
+
+#if 0
+    x = encoders0.build_cgraph(ctx, x, flash_attn);
+    x = encoders0.build_cgraph(ctx, x, flash_attn);
+#endif
     return x;
 }
 
@@ -330,7 +361,21 @@ void CTC::onload(const gguf_loader &loader, const std::string &prefix)
     LOAD_OPTIONAL_TENSOR(bias);
 }
 
-ggml_tensor * CTC::build_cgraph(ggml_context *ctx, ggml_tensor *x) const
+std::array<ggml_tensor *, 2> CTC::build_cgraph(ggml_context *ctx, ggml_tensor *encoder_out) const
 {
-    return x;
+    // Reshape encoder_out to merge batch and time dimensions
+    ggml_tensor *x ;
+    {
+        ggml_reshape_2d(ctx, encoder_out, encoder_out->ne[0], encoder_out->ne[1] * encoder_out->ne[2]);
+        x = ggml_mul_mat(ctx, weight, x);
+        x = ggml_add(ctx, x, bias);
+        // Reshape back to 3D
+        x = ggml_reshape_3d(ctx, x, x->ne[0], encoder_out->ne[1], encoder_out->ne[2]);
+    }
+
+    ggml_tensor *probs = ggml_soft_max(ctx, x);
+    probs = ggml_reshape_2d(ctx, probs, probs->ne[0], probs->ne[1] * probs->ne[2] * probs->ne[3]);
+    ggml_tensor *argmax_logit = ggml_argmax(ctx, probs);
+    argmax_logit = ggml_reshape_3d(ctx, argmax_logit, x->ne[1], x->ne[2], x->ne[3]);
+    return {probs, argmax_logit};
 }

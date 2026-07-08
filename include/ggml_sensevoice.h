@@ -17,6 +17,8 @@ struct sensevoice_model_t
 struct sensevoice_state_t
 {
     ggml_backend_sched_t sched = nullptr;
+
+    ggml_tensor *feature;
     
     ggml_context *ctx_build;
     void *build_buf;

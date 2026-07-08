@@ -115,8 +115,10 @@ struct SinusoidalPositionEncoder : Module
 {
     ggml_tensor* weight;
 
+    void compute(int , int , ggml_tensor *position, ggml_tensor *embedding);
+
     void onload(const gguf_loader &loader, const std::string &prefix);
-    ggml_tensor *build_cgraph(ggml_context *ctx, ggml_tensor *x) const;
+    ggml_tensor *build_cgraph(ggml_context *ctx, ggml_tensor *feature, int n_hidden_state) const;
 };
 
 struct PositionwiseFeedForward : Module
@@ -156,6 +158,13 @@ struct EncoderLayerSANM : Module
 
 struct SenseVoiceEncoderSmall : Module
 {
+    int vocab_size;
+    int output_size;
+    int linear_units;
+    int attention_heads;
+    int num_blocks;
+    int tp_blocks;
+
     SinusoidalPositionEncoder embed;
 
     EncoderLayerSANM encoders0;
@@ -174,7 +183,7 @@ struct SenseVoiceEncoderSmall : Module
 struct CTC : BasicModule
 {
     void onload(const gguf_loader &loader, const std::string &prefix);
-    ggml_tensor *build_cgraph(ggml_context *ctx, ggml_tensor *x) const;
+    std::array<ggml_tensor *, 2>build_cgraph(ggml_context *ctx, ggml_tensor *x) const;
 };
 
 #endif //  __GGML_MODULE_H__

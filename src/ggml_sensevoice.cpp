@@ -3,6 +3,9 @@
 #include "gguf_loader.h"
 #include "ggml_sensevoice.h"
 
+#define SENSEVOICE_FEATURES_DIM 560
+#define SENSEVOICE_CHUNK_SIZE 20  //to do 
+
 void get_sensevoice_default_params(struct sensevoice_params_t *params)
 {
     params->n_vocab = 25055;                // number of vocab
@@ -51,9 +54,8 @@ void get_sensevoice_default_params(struct sensevoice_params_t *params)
 
 //static bool 
 //init_sensevoice_kv_cache(); 
-//
 
-ggml_cgraph *sensevoice_build_cgraph(struct sensevoice_model_t *model, struct sensevoice_state_t *state)
+ggml_cgraph *sensevoice_build_cgraph(struct sensevoice_model_t *model, struct sensevoice_state_t *state, struct sensevoice_params_t *hparams)
 {
     struct ggml_init_params params = {
         .mem_size   = state->build_buf_size,
@@ -72,15 +74,23 @@ ggml_cgraph *sensevoice_build_cgraph(struct sensevoice_model_t *model, struct se
         return NULL;
     }
 
-    
-    //ggml_tensor *input = ggml_new_tensor_1d(state->ctx_build, GGML_TYPE_F32, VAD_CHUNK_SIZE);
+    ggml_tensor *input = state->feature;
+    ggml_set_name(input, "feature");
+    ggml_set_input(input);
 
-    //ggml_tensor *output = ggml_sigmoid(state->ctx_build, x);
-    //ggml_set_name(output, "logit");
+    //hparam to do 
+    ggml_tensor *x = model->encoder.build_cgraph(state->ctx_build, input);
+
+    auto [probs, argmax_logit]  = model->ctc.build_cgraph(state->ctx_build, x);
+
+    ggml_set_name(probs, "probs");
+    ggml_set_output(probs);
+
+    ggml_set_name(argmax_logit, "argmax_logit");
+    ggml_set_output(argmax_logit);
 
     ggml_cgraph *gf = ggml_new_graph(state->ctx_build);
-    //ggml_build_forward_expand(gf, input);
-
+    ggml_build_forward_expand(gf, argmax_logit);
     return gf;
 }
 
@@ -181,30 +191,28 @@ int load_sensevoice_model(struct ggml_handle_t *ggml_handle, const char *model_d
         }
 
         gguf_loader loader(model_data);
-
         model->ctx = ggml_init(ggml_init_params{ .mem_size = ggml_graph_overhead() * GGML_DEFAULT_GRAPH_SIZE, .no_alloc = true });
 
         model->encoder.onload(loader, params->n_encoder_layers, params->n_tp_encoder_layers, prefix);
         model->ctc.onload(loader, "ctc.ctc_lo");
 
         auto tensors = model->encoder.get_all_tensors();
-
         for(auto &kv : model->ctc.get_all_tensors())
             tensors.insert(std::move(kv));
 
         ggml_model_weight_alloc(model->ctx, ggml_handle->backend, model->buf_weights, tensors);
-
         ggml_handle->is_model_alloc = 1;
     }
 
+    /* vocab */
+    // tokenizer.ggml.tokens
 
     /* cache */
-#if 0
-    //kqv 
     struct ggml_init_params cache_params = {
-        .mem_size = sizeof(float) * params->lstm_state_dim * 2 + 256,
+        .mem_size = sizeof(float) * SENSEVOICE_CHUNK_SIZE * SENSEVOICE_FEATURES_DIM + 256,
         .no_alloc = true,
     };
+    //to do dynamic
     state->ctx_cache = ggml_init(cache_params);
     if(!state->ctx_cache)
     {
@@ -212,8 +220,7 @@ int load_sensevoice_model(struct ggml_handle_t *ggml_handle, const char *model_d
         return ERROR;
     }
 
-    state->vad_lstm_context = ggml_new_tensor_1d(state->ctx_cache, GGML_TYPE_F32, params->lstm_state_dim);
-    state->vad_lstm_hidden_state = ggml_new_tensor_1d(state->ctx_cache, GGML_TYPE_F32, params->lstm_state_dim);
+    state->feature = ggml_new_tensor_2d(state->ctx_cache, GGML_TYPE_F32, SENSEVOICE_FEATURES_DIM, SENSEVOICE_CHUNK_SIZE);
     state->buf_cache = ggml_backend_alloc_ctx_tensors(state->ctx_cache, ggml_handle->backend); //cpu
     if (!state->buf_cache)
     {
@@ -221,11 +228,10 @@ int load_sensevoice_model(struct ggml_handle_t *ggml_handle, const char *model_d
         return ERROR;
     }
 
-    float zeros[params->lstm_state_dim] = {0};
-    ggml_backend_tensor_set(state->vad_lstm_context, zeros, 0, sizeof(zeros));
-    ggml_backend_tensor_set(state->vad_lstm_hidden_state, zeros, 0, sizeof(zeros));
+    float zeros[SENSEVOICE_FEATURES_DIM * SENSEVOICE_CHUNK_SIZE] = {0};
+    ggml_backend_tensor_set(state->feature, zeros, 0, sizeof(zeros));
 
-#endif
+    /* kqv */
 
     state->build_buf_size = ggml_graph_overhead() * GGML_DEFAULT_GRAPH_SIZE;
     state->build_buf = malloc(state->build_buf_size);
@@ -246,7 +252,7 @@ int load_sensevoice_model(struct ggml_handle_t *ggml_handle, const char *model_d
         true
     );
 
-    ggml_cgraph *gf = sensevoice_build_cgraph(model, state);
+    ggml_cgraph *gf = sensevoice_build_cgraph(model, state, params);
     if (!ggml_backend_sched_alloc_graph(state->sched, gf))
     {
         LOG_ERROR("sched_alloc_graph error");
@@ -286,12 +292,13 @@ int load_sensevoice_model(struct ggml_handle_t *ggml_handle, const char *model_d
 
 int sensevoice_frontend_process(struct ggml_handle_t *ggml_handle, matrix_t **input_matrix)
 {
+    return SUCCESS;
 }
 
 int sensevoice_backend_process(struct ggml_handle_t *ggml_handle, float speech_prob)
 {
+    return SUCCESS;
 }
-
 
 int sensevoice_inference(struct ggml_handle_t *ggml_handle, matrix_t **input_matrix,
                         matrix_t **output_matrix)
@@ -301,7 +308,7 @@ int sensevoice_inference(struct ggml_handle_t *ggml_handle, matrix_t **input_mat
     struct sensevoice_model_t *model = (struct sensevoice_model_t *)ggml_handle->model;
     struct sensevoice_state_t *state = (struct sensevoice_state_t *)ggml_handle->state;
 
-    ggml_cgraph *gf = sensevoice_build_cgraph(model, state);
+    ggml_cgraph *gf = sensevoice_build_cgraph(model, state, params);
 
     if (!ggml_backend_sched_alloc_graph(state->sched, gf))
     {
