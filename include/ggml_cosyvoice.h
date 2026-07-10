@@ -21,7 +21,16 @@ struct cosyvoice_model_t
     ggml_context *ctx;
     ggml_backend_buffer_t buf_weights;
 
-    Conv1d decoder;
+    //prompt
+
+    CausalMaskedDiffWithDiT flow;
+    CausalHiFTGenerator hift;
+    CosyVoice3LM llm;
+
+    ggml_type k_type;
+    ggml_type v_type;
+
+    std::set<int> stop_tokens;
 };
 
 struct cosyvoice_state_t

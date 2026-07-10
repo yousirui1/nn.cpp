@@ -4,4 +4,5 @@
 3. simd 
 4. cosyvoic 
     worker 
+    bpe parse
 

@@ -11,7 +11,7 @@ void get_cosyvoice_default_params(struct cosyvoice_params_t *params)
     params->llm_use_flash_attn = true;
 
     // llm_kv_cache_type
-
+    //
     params->n_batch = 256;
     params->n_max_seq = COSYVOICE_DEFAULT_LLM_MAX_SEQ_LEN;
 
@@ -21,7 +21,6 @@ void get_cosyvoice_default_params(struct cosyvoice_params_t *params)
     // sampler
     // sampler_ctx
 }
-
 
 //prompt_file()
 
@@ -91,7 +90,6 @@ ggml_cgraph *cosyvoice_build_cgraph(struct cosyvoice_model_t *model, struct cosy
 
 int load_cosyvoice_model(struct ggml_handle_t *ggml_handle, const char *model_data, int model_size)
 {
-#if 0
     struct cosyvoice_params_t *params = new cosyvoice_params_t;
     if(NULL == params)
     {
@@ -135,44 +133,24 @@ int load_cosyvoice_model(struct ggml_handle_t *ggml_handle, const char *model_da
 
         model->ctx = ggml_init(ggml_init_params{ .mem_size = ggml_graph_overhead() * GGML_DEFAULT_GRAPH_SIZE, .no_alloc = true });
 
-        model->stft.onload(loader, prefix);
+        model->flow.onload(loader, {});
+        model->hift.onload(loader, {});
+        model->llm.onload(loader, {});
 
-        //LOG_DEBUG("stft.forward_basis_buffer %p", model->stft.forward_basis_buffer);
+        auto tensors = model->llm.get_all_tensors();
 
-        model->encoders.resize(params->n_encoder_layer);
-        for(int i = 0; i < params->n_encoder_layer; ++i)
-        {
-            auto& layer = model->encoders[i];
-            std::string name = prefix + ".encoder."  + std::to_string(i) + ".reparam_conv";
-            layer.onload(loader, name);
-        }
-        model->rnn.onload(loader, prefix + ".decoder");
-        model->decoder.onload(loader, prefix + ".decoder.decoder.2");
-
-#if 0
-        model->buf_weights = ggml_backend_alloc_ctx_tensors(model->ctx, ggml_handle->backend);
-        if(!model->buf_weights)
-        {
-            LOG_ERROR("buf weights ggml_backend_alloc_ctx_tensors error");
-            return ERROR;
-        }
-#endif
-        auto tensors = model->stft.get_all_tensors();
-
-        for(auto &layer : model->encoders)
-            for(auto &kv : layer.get_all_tensors())
-                tensors.insert(std::move(kv));
-
-        for(auto &kv : model->rnn.get_all_tensors())
+        for(auto &kv : model->flow.get_all_tensors())
             tensors.insert(std::move(kv));
 
-        for(auto &kv : model->decoder.get_all_tensors())
+        for(auto &kv : model->hift.get_all_tensors())
             tensors.insert(std::move(kv));
 
         ggml_model_weight_alloc(model->ctx, ggml_handle->backend, model->buf_weights, tensors);
         ggml_handle->is_model_alloc = 1;
+
     }
 
+#if 0
     /* cache */
     struct ggml_init_params cache_params = {
         .mem_size = sizeof(float) * params->lstm_state_dim * 2 + 256,
