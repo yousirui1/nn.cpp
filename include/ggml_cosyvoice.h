@@ -2,6 +2,7 @@
 #define __GGML_COSYVOICE_H__
 
 #include "ggml_module.h"
+#include <set>
 
 #define COSYVOICE_MAX_NODES 8192
 
@@ -18,6 +19,7 @@ struct cosyvoice_params_t
 
 struct cosyvoice_model_t
 {
+#if 0
     ggml_context *ctx;
     ggml_backend_buffer_t buf_weights;
 
@@ -31,6 +33,7 @@ struct cosyvoice_model_t
     ggml_type v_type;
 
     std::set<int> stop_tokens;
+#endif
 };
 
 struct cosyvoice_state_t

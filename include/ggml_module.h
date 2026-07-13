@@ -16,8 +16,24 @@ struct gguf_loader;
 
 struct ggml_backend_op_capabilities_t
 {
-    bool concat_i32 : 1;
-    bool repeat_f16 : 1;
+    bool concat_i32    : 1;
+    bool repeat_f16    : 1;
+    bool pad           : 1;
+    bool pad_reflect_1d: 1;
+    bool im2col_f16    : 1;
+    bool fill          : 1;
+    bool cumsum        : 1;
+    bool emb_cast_f32  : 1;
+    bool top_k         : 1;
+    bool leaky_relu    : 1;
+    bool sin           : 1;
+    bool cos           : 1;
+    bool arange        : 1;
+    bool elu           : 1;
+    bool abs           : 1;
+    bool floor         : 1;
+    bool acc           : 1;
+
 };
 
 
@@ -109,7 +125,7 @@ struct CausalConvRNNF0Predictor : Module
     Linear classifier;
 
     void onload(const gguf_loader &loader, const std::string &prefix);
-    ggml_tensor *build_cgraph(ggml_tensor *ctx, ggml_tensor *x) const;
+    ggml_tensor *build_cgraph(ggml_context *ctx, ggml_tensor *x) const;
 };
 
 struct CausalConv1dDownSample : CausalConv1dBase
@@ -130,9 +146,9 @@ struct CausalConvPositionEmbedding : Module
     Conv1d conv2;
 
     void onload(const gguf_loader &loader, const std::string &prefix);
-    //ggml_tensor *build_cgraph(ggml_context *ctx, ggml_tensor *x, ggml_back) const;
-};
+    ggml_tensor *build_cgraph(ggml_context *ctx, ggml_tensor *x, ggml_backend_op_capabilities_t capabilities) const;
 
+};
 
 struct Snake : Module
 {
@@ -140,7 +156,7 @@ struct Snake : Module
     ggml_tensor *alpha;
 
     void onload(const gguf_loader &loader, const std::string &prefix);
-    ggml_tensor *build_cgraph(ggml_context *ctx, ggml_tensor *x)const;
+    ggml_tensor *build_cgraph(ggml_context *ctx, ggml_tensor *x) const;
 };
 
 struct ResBlock : Module
@@ -209,7 +225,7 @@ struct InputEmbedding : Module
 
     void onload(const gguf_loader &loader, const std::string &prefix);
 
-    //ggml_tensor *build_cgraph(ggml_context *ctx, ggml_tensor *x, ggml_tensor *cond, ggml_tensor *text_embed, ggml_tensor *spks, ggml_back);
+    ggml_tensor *build_cgraph(ggml_context *ctx, ggml_tensor *x, ggml_tensor *cond, ggml_tensor *text_embed, ggml_tensor *spks, ggml_backend_op_capabilities_t capabilities) const;
 };
 
 struct TimestepEmbedding : Module
@@ -222,7 +238,6 @@ struct TimestepEmbedding : Module
     ggml_tensor *build_cgraph(ggml_context *ctx, ggml_tensor *x) const;
 };
 
-
 struct CTC : BasicModule
 {
     void onload(const gguf_loader &loader, const std::string &prefix);
@@ -230,7 +245,7 @@ struct CTC : BasicModule
 };
 
 
-struct AdaLayerNorm_Final : Module
+struct AdaLayerNormFinal : Module
 {
     Linear linear;
 
@@ -313,18 +328,20 @@ struct DiTBlock : Module
 
 struct DiT : Module
 {
-    TimestepEmbeding time_embed;
+    TimestepEmbedding time_embed;
     InputEmbedding input_embed;
 
     std::vector<DiTBlock> transformer_blocks;
 
-    AdaLayerNorm_Final norm_out;
+    AdaLayerNormFinal norm_out;
     Linear proj_out;
 
     int mel_dim;
 
     void onload(const gguf_loader &loader, const std::string &prefix);
-    //ggml_tensor *bu
+    ggml_tensor *build_cgraph(ggml_context *ctx, ggml_tensor *x, ggml_tensor *mu, ggml_tensor *t,
+            ggml_tensor *spks, ggml_tensor *cond, int64_t cut_len, ggml_tensor* &position_ids,
+            ggml_backend_op_capabilities_t capabilities) const;
 
 };
 
@@ -347,7 +364,10 @@ struct CausalConditionalCFM : Module
 
     DiTContext prepare_context(ggml_context *ctx, ggml_tensor *mu, ggml_tensor *spks, ggml_tensor *cond) const;
     std::array<float, 2> get_t_and_dt(ggml_context *ctx, int step) const;
-    //ggml_tensor *build_cgraph_on_step(ggml_context *ctx, const DiTContext &dit_ctx, int step, ggml_
+
+    ggml_tensor* build_cgraph_one_step(ggml_context* ctx, const DiTContext& dit_ctx, int step, ggml_backend_op_capabilities_t capabilities, int64_t cut_len, ggml_tensor*& t_tensor, ggml_tensor*& position_ids) const;
+
+
 };
 
 struct PreLookaheadLayer : Module
@@ -366,9 +386,9 @@ struct SineGen2 : Module
 {
     ggml_tensor *rand_ini;
 
-    std::array<ggml_tensor *, 2> build_cgraph(ggml_tensor *ctx, ggml_tensor *f0, int harmonic_num, 
-            int sample_rate, int upsample_scale, float sine_amp, int voiced_threshold, 
-            float noise_std) const;
+    std::array<ggml_tensor *, 2>build_cgraph(ggml_context *ctx, ggml_tensor *f0, 
+                           int harmonic_num, int sampling_rate, int upsample_scale, float sine_amp,
+                           int voiced_threshold, float noise_std) const;
 };
 
 struct SourceModuleHnNSF : Module
@@ -377,9 +397,11 @@ struct SourceModuleHnNSF : Module
     Linear l_linear;
 
     void onload(const gguf_loader &loader, const std::string &prefix);
-    std::array<ggml_tensor *, 2> build_cgraph(ggml_tensor *ctx, ggml_tensor *x, int harmonic_num, 
-            int sample_rate, int upsample_scale, float sine_amp, int voiced_threshold, 
-            float noise_std) const;
+
+    std::array<ggml_tensor*, 2> build_cgraph(ggml_context* ctx, ggml_tensor* x, int harmonic_num, 
+                            int sampling_rate, int upsample_scale, float sine_amp, 
+                            int voiced_threshold, float noise_std) const;
+
 };
 
 struct EncoderLayerSANM : Module
@@ -456,6 +478,7 @@ struct SenseVoiceEncoderSmall : Module
     ggml_tensor *build_cgraph(ggml_context *ctx, ggml_tensor *x, int fsmn_kernel_size, int flash_attn) const;
 };
 
+#if 0
 struct CausalMaskedDiffWithDiT : Module
 {
     struct EncodeResult
@@ -476,6 +499,7 @@ struct CausalMaskedDiffWithDiT : Module
 
     //EncodeResult build_cgraph_encode(ggml_context *ctx, ggml_tensor *token, ggml_tensor *prompt_token, ggml_tensor *prompt_feat, ggml_tensor *embedding, ggml_back);
 };
+#endif
 
 struct CausalHiFTGenerator : Module
 {
@@ -497,7 +521,7 @@ struct CausalHiFTGenerator : Module
     CausalConvRNNF0Predictor f0_predictor;
     SourceModuleHnNSF m_source;
     CausalConv1d conv_pre;
-    std::vector<CausalConv1dUpsample> ups;
+    std::vector<CausalConv1dUpSample> ups;
     std::vector<std::unique_ptr<CausalConv1dBase>> source_downs;
     std::vector<ResBlock> source_resblocks;
     std::vector<ResBlock> resblocks;
@@ -523,7 +547,6 @@ struct CosyVoice3LM : Module
     Qwen2RMSNorm norm;
     Linear llm_decoder;
 
-    //to do 
     //void onload(const gguf_loader &loader, const std::string &prefix, const cosyvoice3_llm_params_t &params);
 
 };

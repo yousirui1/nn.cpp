@@ -7,6 +7,7 @@
 
 void get_cosyvoice_default_params(struct cosyvoice_params_t *params)
 {
+#if 0
     params->flow_use_flash_attn = true;
     params->llm_use_flash_attn = true;
 
@@ -20,6 +21,7 @@ void get_cosyvoice_default_params(struct cosyvoice_params_t *params)
     // builtin_sampler_rng_policy
     // sampler
     // sampler_ctx
+#endif
 }
 
 //prompt_file()
@@ -90,6 +92,7 @@ ggml_cgraph *cosyvoice_build_cgraph(struct cosyvoice_model_t *model, struct cosy
 
 int load_cosyvoice_model(struct ggml_handle_t *ggml_handle, const char *model_data, int model_size)
 {
+#if 0
     struct cosyvoice_params_t *params = new cosyvoice_params_t;
     if(NULL == params)
     {
@@ -222,6 +225,7 @@ int load_cosyvoice_model(struct ggml_handle_t *ggml_handle, const char *model_da
     //to do no use
     set_shape(&ggml_handle->output_shape[0], TENSOR_FLOAT32, 1, params->max_speech_duration_ms * 16);
 #endif
+#endif
     return SUCCESS;
 }
 
@@ -239,6 +243,7 @@ int cosyvoice_backend_process(struct ggml_handle_t *ggml_handle, float speech_pr
 int cosyvoice_inference(struct ggml_handle_t *ggml_handle, matrix_t **input_matrix,
                         matrix_t **output_matrix)
 {
+#if 0
 
     struct cosyvoice_params_t *params = (struct cosyvoice_params_t *)ggml_handle->params;
     struct cosyvoice_model_t *model = (struct cosyvoice_model_t *)ggml_handle->model;
@@ -289,12 +294,14 @@ int cosyvoice_inference(struct ggml_handle_t *ggml_handle, matrix_t **input_matr
     cosyvoice_backend_process(ggml_handle, speech_prob);
     ggml_backend_sched_reset(state->sched);
 #endif
+#endif
     return SUCCESS;
 }
 
 
 void unload_cosyvoice_model(struct ggml_handle_t *ggml_handle)
 {
+#if 0
     struct cosyvoice_params_t *params = (struct cosyvoice_params_t *)ggml_handle->params;
     struct cosyvoice_model_t *model = (struct cosyvoice_model_t *)ggml_handle->model;
     struct cosyvoice_state_t *state = (struct cosyvoice_state_t *)ggml_handle->state;
@@ -344,5 +351,6 @@ void unload_cosyvoice_model(struct ggml_handle_t *ggml_handle)
     ggml_handle->state = NULL;
     ggml_handle->model = NULL;
     ggml_handle->params = NULL;
+#endif
 }
 

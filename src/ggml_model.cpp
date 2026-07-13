@@ -140,14 +140,12 @@ void deinit_ggml()
             {
                 ggml_backend_free(cpu_backend);
             }
-
         }
 
         if(backend)
         {
             ggml_backend_free(backend);
         }
-
     
         backend = nullptr;
         cpu_backend = nullptr;
