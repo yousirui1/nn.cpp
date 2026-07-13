@@ -2,7 +2,6 @@
 #include "span_compat.h"
 #include "gguf_loader.h"
 #include "ggml_module.h"
-//backend arm64 
 
 static void split_tensor(ggml_context *ctx, ggml_tensor *tensor, int dim, ggml_tensor **tensors, uint16_t chunks)
 {
@@ -120,214 +119,6 @@ static ggml_tensor *concat_tensors(ggml_context *ctx, std::array<ggml_tensor *,c
     return concat_tensors(ctx, tensors.data(), chunks, dim, capabilities);
 }
 
-#if 0
-struct istft_context
-{
-    int nfft;
-    ggml_tensor* idft_real;
-    ggml_tensor* idft_imag;
-};
-
-static void ggml_fft_op(struct ggml_tensor* dst, int ith, int nth, fft_context* ctx)
-{
-    auto buffer_scratchr = reinterpret_cast<float*>(alloca(sizeof(float) * ctx->max_factor_value * 2));
-    auto buffer_scratchi = buffer_scratchr + ctx->max_factor_value;
-    auto const signal = dst->src[0];
-    auto const data = reinterpret_cast<char*>(signal->data);
-    const auto foutr = reinterpret_cast<char*>(dst->data);
-    const auto fouti = foutr + dst->nb[2];
-    const auto dst_nb1 = dst->nb[1];
-    const auto signal_nb1 = signal->nb[1];
-    const auto signal_ne1 = signal->ne[1];
-
-    ++ctx->workers;
-
-    for (int64_t i = ctx->idx++; i < signal_ne1; i = ctx->idx++)
-    {
-        const auto cur_offset = dst_nb1 * i;
-        const auto cur_fouti = reinterpret_cast<float*>(fouti + cur_offset);
-        memset(cur_fouti, 0, dst_nb1);
-        kf_work(reinterpret_cast<float*>(foutr + cur_offset),
-            cur_fouti,
-            reinterpret_cast<float*>(data + signal_nb1 * i),
-            1, 1, ctx->factors,
-            buffer_scratchr, buffer_scratchi, *ctx);
-    }
-
-    if (--ctx->workers == 0) ctx->idx = 0;
-}
-
-ggml_tensor* ggml_fft(ggml_context* ctx, ggml_tensor* a, fft_context* fctx)
-{
-    GGML_ASSERT(ggml_is_matrix(a));
-    GGML_ASSERT(a->ne[0] == fctx->nfft);
-    GGML_ASSERT(ggml_is_contiguous(a));
-
-    return ggml_custom_4d(ctx, a->type, fctx->nfft, a->ne[1], 2, 1, &a, 1, reinterpret_cast<ggml_custom_op_t>(ggml_fft_op), GGML_N_TASKS_MAX, fctx);
-}
-
-ggml_tensor* ggml_stft(ggml_context* ctx, ggml_tensor* a, ggml_tensor* b, int hop_len, bool center, fft_context* fctx)
-{
-    GGML_ASSERT(ggml_is_vector(a));
-    GGML_ASSERT(ggml_is_vector(b));
-    GGML_ASSERT(ggml_is_contiguous(a));
-
-    if (center)
-    {
-        const auto pad_amount = fctx->nfft / 2;
-        a = ggml_pad_reflect_1d(ctx, a, pad_amount, pad_amount);
-    }
-    else
-        a = ggml_dup(ctx, a);
-
-    ggml_set_cpu(a);
-
-    const auto win_size = b->ne[0];
-    const auto n_frames = (a->ne[0] - win_size) / hop_len + 1;
-
-    a = ggml_dup_inplace(ctx, a);
-    a->ne[0] = win_size;
-    a->ne[1] = n_frames;
-    a->nb[1] = hop_len * a->nb[0];
-    a->op = GGML_OP_VIEW;
-    ggml_set_cpu(a);
-
-    b = ggml_repeat(ctx, b, a);
-    ggml_set_cpu(b);
-    a = ggml_mul(ctx, a, b);
-    ggml_set_cpu(a);
-
-    auto result = ggml_fft(ctx, a, fctx);
-    result = ggml_view_3d(ctx, result, fctx->nfft / 2 + 1, n_frames, 2, result->nb[1], result->nb[2], 0);
-    return ggml_permute(ctx, result, 1, 0, 2, 3);
-}
-
-istft_context_ptr create_istft_context(int nfft, ggml_context* ctx, std::function<void(ggml_tensor*, void*, size_t)> set_data)
-{   
-    const int f = nfft / 2 + 1;
-    const int stride = f * nfft;
-    std::unique_ptr<float[]> idft_real(new float[stride * 2]);
-    auto idft_imag = idft_real.get() + stride;
-    for (int y = 0; y != f; ++y)
-        for (int x = 0; x != nfft; ++x)
-        {
-            const float phase = 2.0f * 3.14159265358979323846f * x * y / nfft;
-            const int offset = x * f + y;
-            idft_real[offset] = std::cos(phase);
-            idft_imag[offset] = phase;
-        }
-    
-    for (int x = 0, y = f - 1; x != nfft; ++x)
-    {
-        const auto offset1 = x * f;
-        const auto offset2 = offset1 + y;
-        idft_real[offset1] /= nfft;
-        idft_real[offset2] /= nfft;
-        idft_imag[offset2] = 0.0f;
-    }
-
-    for (int y = 1, endy = f - 1; y != endy; ++y)
-        for (int x = 0; x != nfft; ++x)
-        {
-            const int idx = x * f + y;
-            auto& real = idft_real[idx];
-            auto& imag = idft_imag[idx];
-            
-            real = 2.0f * real / nfft;
-            imag = -2.0f * std::sin(imag) / nfft;
-        }
-
-    auto ictx = new istft_context;
-    ictx->nfft = nfft;
-    ictx->idft_real = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, f, nfft);
-    ictx->idft_imag = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, f, nfft);
-    set_data(ictx->idft_real, idft_real.get(), sizeof(float) * stride);
-    set_data(ictx->idft_imag, idft_imag, sizeof(float) * stride);
-    return istft_context_ptr(ictx);
-}
-
-static void ggml_istft_finalize_op(struct ggml_tensor* dst, int ith, int nth, void* userdata)
-{
-    auto idx = dst->src[0];
-    auto idx_data = reinterpret_cast<int32_t*>(idx->data);
-    auto frames = reinterpret_cast<float*>(dst->src[1]->data);
-    auto w_sq = reinterpret_cast<float*>(dst->src[2]->data);
-    auto dst_data = reinterpret_cast<float*>(dst->data);
-    auto denom_data = reinterpret_cast<float*>(dst->src[3]->data);
-
-    const auto offset = userdata ? reinterpret_cast<intptr_t>(userdata) : 0;
-    const auto out_len = dst->ne[0];
-    auto win_len = dst->src[2]->ne[0];
-
-    const auto begin = (out_len * ith) / nth;
-    const auto end = (out_len * (ith + 1)) / nth;
-
-    memset(dst_data + begin, 0, (end - begin) * sizeof(float));
-    memset(denom_data + begin, 0, (end - begin) * sizeof(float));
-    const auto n = ggml_nelements(idx);
-    for (int64_t i = 0; i != n; ++i) {
-        const auto cur = idx_data[i] - offset;
-        if (cur < begin || cur >= end)
-            continue;
-
-        dst_data[cur] += frames[i];
-        denom_data[cur] += w_sq[i % win_len];
-    }
-
-    constexpr float eps = 1e-8f;
-    int64_t i = begin;
-    for (const __m256 eps_v = _mm256_set1_ps(eps); i + 7 < end; i += 8) {
-        auto y_ptr = dst_data + i;
-        __m256 denom = _mm256_loadu_ps(denom_data + i);
-        __m256 y = _mm256_loadu_ps(y_ptr);
-        denom = _mm256_max_ps(denom, eps_v);
-        y = _mm256_div_ps(y, denom);
-        _mm256_storeu_ps(y_ptr, y);
-    }
-
-    for (const __m128 eps_v = _mm_set_ps1(eps); i + 3 < end; i += 4) {
-        auto y_ptr = dst_data + i;
-        __m128 denom = _mm_loadu_ps(denom_data + i);
-        __m128 y = _mm_loadu_ps(y_ptr);
-        denom = _mm_max_ps(denom, eps_v);
-        y = _mm_div_ps(y, denom);
-        _mm_storeu_ps(y_ptr, y);
-    }
-    for (; i < end; ++i) {
-        auto denom = denom_data[i];
-        denom = std::max(denom, eps);
-        dst_data[i] /= denom;
-    }
-}
-
-ggml_tensor* ggml_istft(ggml_context* ctx, ggml_tensor* a, ggml_tensor* b, ggml_tensor* c, int hop_len, bool center, istft_context* ictx)
-{
-    GGML_ASSERT(ggml_are_same_shape(a, b));
-    GGML_ASSERT(a->ne[1] == ictx->nfft / 2 + 1);
-
-    a = ggml_cont(ctx, ggml_permute(ctx, a, 1, 0, 2, 3));
-    b = ggml_cont(ctx, ggml_permute(ctx, b, 1, 0, 2, 3));
-
-    auto frames = ggml_add(ctx,
-        ggml_mul_mat(ctx, ictx->idft_real, a),
-        ggml_mul_mat(ctx, ictx->idft_imag, b));
-    frames = ggml_mul(ctx, frames, c);
-
-    auto t_idx = ggml_arange(ctx, 0, static_cast<float>(b->ne[1] * hop_len), static_cast<float>(hop_len));
-    auto n_idx = ggml_arange(ctx, 0, static_cast<float>(ictx->nfft), 1.f);
-    t_idx = ggml_reshape_2d(ctx, t_idx, 1, t_idx->ne[0]);
-    t_idx = ggml_repeat_4d(ctx, t_idx, ictx->nfft, t_idx->ne[1], 1, 1);
-    n_idx = ggml_repeat_4d(ctx, n_idx, n_idx->ne[0], a->ne[1], 1, 1);
-    auto idx = ggml_add(ctx, t_idx, n_idx);
-    idx = ggml_cast(ctx, idx, GGML_TYPE_I32);
-
-    auto w_sq = ggml_mul(ctx, c, c);
-    auto out_len_full = (b->ne[1] - 1) * hop_len + (center ? 0 : ictx->nfft);
-    ggml_tensor* args[] = { idx, frames, w_sq, ggml_new_tensor_1d(ctx, GGML_TYPE_F32, out_len_full) };
-    return ggml_custom_4d(ctx, GGML_TYPE_F32, out_len_full, 1, 1, 1, args, 4, ggml_istft_finalize_op, GGML_N_TASKS_MAX, reinterpret_cast<void*>(intptr_t(center ? ictx->nfft / 2 : 0)));
-}
-#endif
-
 
 static ggml_tensor *unsqueeze(ggml_context *ctx, ggml_tensor *x, int dim)
 {
@@ -388,6 +179,17 @@ static struct ggml_tensor * ggml_mul_mat_pad(struct ggml_context * ctx, struct g
 // TODO: CUDA is currently broken - seems ggml_mul_mat does not handle views correctly
 #if defined(GGML_USE_METAL)
 #define ggml_mul_mat ggml_mul_mat_pad
+#endif
+
+#if 0
+ggml_tensor *ggml_fft(ggml_context *ctx, ggml_tensor *a, fft_context_t *fft_ctx)
+{
+    GGML_ASSERT(ggml_is_matrix(a));
+    GGML_ASSERT(a->ne[0] == fft_ctx->nfft);
+    GGML_ASSERT(ggml_is_contiguous(a));
+
+    //return ggml_custom_4d(ctx, a->type, fft_ctx->nfft, a->ne[1], 2, 1, &a, 1, reinterpret_cast<ggml_custom_op_t>(ggml_fft_op)
+}
 #endif
 
 void Module::onload(const gguf_loader& loader, const std::string& prefix) {}
@@ -1556,6 +1358,179 @@ ggml_tensor *SenseVoiceEncoderSmall::build_cgraph(ggml_context *ctx, ggml_tensor
     return x;
 }
 
+void CausalMaskedDiffWithDiT::onload(const gguf_loader &loader, const std::string &prefix)
+{
+    LOAD_METADATA(token_mel_ratio);
+
+    LOAD_TENSOR_EX("input_embedding.weight", input_embedding);
+    LOAD_SUBMODULE(spk_embed_affine_layer);
+    LOAD_SUBMODULE(pre_lookahead_layer);
+    LOAD_SUBMODULE(decoder);
+}
+
+CausalMaskedDiffWithDiT::EncodeResult CausalMaskedDiffWithDiT::build_cgraph_encode(
+                ggml_context *ctx, ggml_tensor *token, ggml_tensor *prompt_token, 
+                ggml_tensor *prompt_feat, ggml_tensor *embedding, 
+                ggml_backend_op_capabilities_t capabilities) const
+{
+    embedding = ggml_l2_norm(ctx, embedding, 1e-6f);
+    embedding = spk_embed_affine_layer.build_cgraph(ctx, embedding);
+
+    token = concat_tensors(ctx, std::array { prompt_token, token }, 0, capabilities);
+    token = ggml_get_rows(ctx, input_embedding, token);
+
+    auto h = pre_lookahead_layer.build_cgraph(ctx, token);
+    h = unsqueeze(ctx, h, 1);
+    h = ggml_repeat_4d(ctx, h, h->ne[0], token_mel_ratio, h->ne[2], h->ne[3]);
+    h = ggml_reshape_3d(ctx, h, h->ne[0], h->ne[1] * h->ne[2], h->ne[3]);
+
+    const auto mel_len1 = prompt_feat->ne[1];
+    const auto mel_len2 = h->ne[1] - mel_len1;
+    auto conds = ggml_pad(ctx, prompt_feat, 0, static_cast<int>(mel_len2), 0, 0);
+
+    return EncodeResult{
+        h, embedding, conds, mel_len1,
+    };
+}
+
+void CausalHiFTGenerator::onload(const gguf_loader &loader, const std::string &prefix)
+{
+    LOAD_SUBMODULE(f0_predictor);
+    LOAD_SUBMODULE(m_source);
+    LOAD_SUBMODULE(conv_pre);
+    conv_pre.causal_type = CausalConv1d::causal_type_t::right;
+
+    int num_kernels;
+    GGML_ASSERT(loader.get_metadata("sample_rate", reinterpret_cast<uint32_t &>(sampling_rate)));
+    LOAD_METADATA(num_kernels);
+    LOAD_METADATA(nb_harmonics);
+    LOAD_METADATA(nsf_alpha);
+    LOAD_METADATA(nsf_voiced_threshold);
+    LOAD_METADATA(nsf_sigma);
+    LOAD_METADATA(lrelu_slope);
+    LOAD_METADATA(audio_limit);
+    GGML_ASSERT(loader.get_metadata(prefix, "istft_params.n_fft", nfft));
+    GGML_ASSERT(loader.get_metadata(prefix, "istft_params.hop_len", hop_len));
+
+    int64_t id;
+    GGML_ASSERT(loader.find_metadata_key(combine_prefix(prefix, "upsample_rates").c_str(), id));
+    GGML_ASSERT(gguf_get_arr_type(loader.gguf_ctx, id) == GGUF_TYPE_INT32);
+
+    auto layers = gguf_get_arr_n(loader.gguf_ctx, id);
+    auto upsample_rates = reinterpret_cast<const int *>(gguf_get_arr_data(loader.gguf_ctx, id));
+
+    ups.resize(layers);
+    scale_factor = hop_len;
+
+    for(size_t i = 0; i != layers; ++i)
+    {
+        auto &up = ups[i];
+        int upsample_rate = upsample_rates[i];
+        scale_factor *= upsample_rate;
+        up.s = upsample_rate;
+        LOAD_SUBMODULE_EX(("ups." + std::to_string(i)).c_str(), up);
+    }
+
+    source_downs.resize(layers);
+    source_resblocks.resize(layers);
+    for(size_t i = 0; i != layers - 1; ++i)
+    {
+        auto down = new CausalConv1dDownSample;
+        down->s = 1;
+        for(size_t j = layers - 1; j > i; --j)
+            down->s *= upsample_rates[j];
+        source_downs[i].reset(down);
+
+        LOAD_SUBMODULE_EX(("source_downs." + std::to_string(i)).c_str(), *down);
+        LOAD_SUBMODULE_EX(("source_resblocks." + std::to_string(i)).c_str(), source_resblocks[i]);
+    }
+
+    /* Final block */
+    {
+        const auto layer_idx = layers - 1;
+        auto conv = new CausalConv1d;
+        conv->d = 1;
+        conv->causal_type = CausalConv1d::causal_type_t::left;
+        source_downs[layer_idx].reset(conv);
+
+        LOAD_SUBMODULE_EX(("source_downs." + std::to_string(layer_idx)).c_str(), *conv);
+        LOAD_SUBMODULE_EX(("source_resblocks." + std::to_string(layer_idx)).c_str(), source_resblocks[layer_idx]);
+    }
+
+    layers *= num_kernels;
+    resblocks.resize(layers);
+    for(size_t i = 0; i != layers; ++i)
+        LOAD_SUBMODULE_EX(("resblocks." + std::to_string(i)).c_str(), resblocks[i]);
+
+    LOAD_SUBMODULE(conv_post);
+    conv_post.causal_type = CausalConv1d::causal_type_t::left;
+}
+
+std::array<ggml_tensor *, 2>CausalHiFTGenerator::build_cgraph(ggml_context *ctx, ggml_tensor *speech_feat) const
+{
+    auto f0 = f0_predictor.build_cgraph(ctx, speech_feat);
+    auto s_input = ggml_permute(ctx, f0, 1, 0, 2, 3);
+    s_input = ggml_interpolate(ctx, s_input, s_input->ne[0], s_input->ne[1] * scale_factor, s_input->ne[2], 1, GGML_SCALE_MODE_NEAREST);
+    auto [s, noise] = m_source.build_cgraph(ctx, s_input, nb_harmonics, sampling_rate, scale_factor,
+            nsf_alpha, nsf_voiced_threshold, nsf_sigma);
+    s = ggml_permute(ctx, s, 1, 0, 2, 3);
+
+    /* decode */
+    ggml_tensor *x;
+    {
+        x = conv_pre.build_cgraph(ctx, speech_feat);
+
+        // todo
+        //auto s_stft = ggml_stft(ctx, s, window, hop_len, true, 
+        //s_stft
+        //s_stft
+
+        const auto num_upsamples = ups.size();
+        const auto num_kernels = resblocks.size() / num_upsamples;
+        for(size_t i = 0; i != num_upsamples; ++i)
+        {
+            x = ggml_leaky_relu(ctx, x, lrelu_slope, false);
+            x = ups[i].build_cgraph(ctx, x);
+
+            if(i == num_upsamples -1)
+                x = ggml_pad_reflect_1d(ctx, x, 1, 0);
+
+            // to do 
+            //auto si = source_downs[i]->build_cgraph(ctx, s_stft);
+            //si = source_resblocks[i].build_cgraph(ctx, si);
+            //x = ggml_add(ctx, x, si);
+
+            auto xs = resblocks[i * num_kernels].build_cgraph(ctx, x);
+            for(size_t j = 1; j != num_kernels; ++j)
+            {
+                xs = ggml_add(ctx, xs,
+                        resblocks[i * num_kernels + j].build_cgraph(ctx, x));
+            }
+            x = ggml_scale(ctx, xs, 1.f / num_kernels);
+        }
+        x = ggml_leaky_relu(ctx, x, 0.0f, false);
+        x = conv_post.build_cgraph(ctx, x);
+
+        auto magnitude = ggml_view_3d(ctx, x, x->ne[0], nfft / 2 + 1, x->ne[2], x->nb[1], x->nb[2], 0);
+        magnitude = ggml_exp(ctx, magnitude);
+        auto phase = ggml_view_3d(ctx, x, x->ne[0], nfft / 2 + 1, x->ne[2], x->nb[1], x->nb[2], (nfft / 2 + 1) * x->nb[1]);
+        phase = ggml_sin(ctx, phase);
+        /* istft */
+        {
+#if 0
+            magnitude = ggml_clamp(ctx, magnitude, 0.f 1e2f);
+            auto real = ggml_mul(ctx, magnitude, ggml_cos(ctx, phase));
+            auto imag = ggml_mul(ctx, magnitude, ggml_sin(ctx, phase));
+
+            x = ggml_istft(ctx, real, imag, window, hop_len, true, ictx.get());
+            x = ggml_clamp(ctx, x, -audio_limit, audio_limit);
+            ggml_set_cpu(x);
+            return {x, noise};
+#endif
+        }
+    }
+}
+
 #if 0
 void Cosyvoice3LM::onload(const gguf_loader &loader, const std::string &prefix)
 {
@@ -1588,3 +1563,4 @@ void Cosyvoice3LM::onload(const gguf_loader &loader, const std::string &prefix)
 #endif
 }
 #endif
+

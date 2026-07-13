@@ -8,7 +8,6 @@
 static int is_init = 0;
 static ggml_backend_t backend, cpu_backend;
 
-
 static int get_ggml_model(struct ggml_handle_t *ggml_handle)
 {
     int i;

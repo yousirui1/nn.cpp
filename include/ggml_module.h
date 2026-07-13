@@ -36,7 +36,6 @@ struct ggml_backend_op_capabilities_t
 
 };
 
-
 template<bool up = true>
 constexpr size_t get_aligned_size(size_t size, size_t alignment)
 {
@@ -478,7 +477,6 @@ struct SenseVoiceEncoderSmall : Module
     ggml_tensor *build_cgraph(ggml_context *ctx, ggml_tensor *x, int fsmn_kernel_size, int flash_attn) const;
 };
 
-#if 0
 struct CausalMaskedDiffWithDiT : Module
 {
     struct EncodeResult
@@ -490,24 +488,23 @@ struct CausalMaskedDiffWithDiT : Module
     };
 
     int token_mel_ratio;
-    ggml_tensor *input_embeddig;
+    ggml_tensor *input_embedding;
     Linear spk_embed_affine_layer;
     PreLookaheadLayer pre_lookahead_layer;
     CausalConditionalCFM decoder;
     
     void onload(const gguf_loader &loader, const std::string &prefix);
 
-    //EncodeResult build_cgraph_encode(ggml_context *ctx, ggml_tensor *token, ggml_tensor *prompt_token, ggml_tensor *prompt_feat, ggml_tensor *embedding, ggml_back);
+    EncodeResult build_cgraph_encode(ggml_context *ctx, ggml_tensor *token, ggml_tensor *prompt_token, ggml_tensor *prompt_feat, ggml_tensor *embedding, ggml_backend_op_capabilities_t capabilities) const;
 };
-#endif
 
 struct CausalHiFTGenerator : Module
 {
     float lrelu_slope;
     int scale_factor;
     int nb_harmonics;
-    int samping_rate;
-    float nfs_alpha;
+    int sampling_rate;
+    float nsf_alpha;
     int nsf_voiced_threshold;
     float nsf_sigma;
     float audio_limit;

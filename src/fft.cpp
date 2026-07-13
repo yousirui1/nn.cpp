@@ -1046,7 +1046,7 @@ matrix_t *stft_compute(void *fft_handle, float *buf)
 
 }
 
-matrix_t *istft_compute()
+matrix_t *istft_compute(void *fft_handle, )
 {
 
 }

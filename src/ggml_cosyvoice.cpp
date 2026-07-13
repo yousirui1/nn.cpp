@@ -7,7 +7,6 @@
 
 void get_cosyvoice_default_params(struct cosyvoice_params_t *params)
 {
-#if 0
     params->flow_use_flash_attn = true;
     params->llm_use_flash_attn = true;
 
@@ -21,15 +20,11 @@ void get_cosyvoice_default_params(struct cosyvoice_params_t *params)
     // builtin_sampler_rng_policy
     // sampler
     // sampler_ctx
-#endif
 }
-
-//prompt_file()
 
 
 ggml_cgraph *cosyvoice_build_cgraph(struct cosyvoice_model_t *model, struct cosyvoice_state_t *state)
 {
-#if 0
     struct ggml_init_params params = {
         .mem_size   = state->build_buf_size,
         .mem_buffer = state->build_buf,
@@ -47,52 +42,247 @@ ggml_cgraph *cosyvoice_build_cgraph(struct cosyvoice_model_t *model, struct cosy
         return NULL;
     }
 
-    ggml_tensor *input = ggml_new_tensor_1d(state->ctx_build, GGML_TYPE_F32, VAD_CHUNK_SIZE);
-    // chunk size must be 576 before pad
-    ggml_set_name(input, "audio_chunk");
-    ggml_set_input(input);
+#if 0
+    model->hift.window = ggml_new_tensor_1d(state->ctx_build, GGML_TYPE_F32, model->hift.nfft);
+    ggml_set_param(model->hift.window);
+    ggml_set_name(model->hift.window, "stft_window");
 
-    ggml_tensor *x = model->stft.build_cgraph(state->ctx_build, input);
+    for(int i = 0; i != model->hift.nfft; ++i)
+        reinterpret_cast<float*>(hift.window->data)[i] = (1.0f - std::cos(2.0f * 3.14159265358979323846f * i / hift.nfft)) / 2.f;
+    hift.fft_ctx;
+    hift.ifft_ctx;
+#endif
 
-    //to do encoder
+    //n_workers
     {
-        x = ggml_conv_1d(state->ctx_build, model->encoders[0].weight, x, 1, 1, 1);
-        x = ggml_add(state->ctx_build, x, ggml_cont(state->ctx_build, ggml_transpose(state->ctx_build, model->encoders[0].bias)));
-        x = ggml_relu(state->ctx_build, x);
+#if 0
+        auto worker = workers + i;
 
-        x = ggml_conv_1d(state->ctx_build, model->encoders[1].weight, x, 2, 1, 1);
-        x = ggml_add(state->ctx_build, x,  ggml_cont(state->ctx_build, ggml_transpose(state->ctx_build, model->encoders[1].bias)));
-        x = ggml_relu(state->ctx_build, x);
+        worker->position_ids = ggml_new_tensor_1d(state->ctx_build, GGML_TYPE_I32, n_batch);
+        //ggml_set_name(position_ids, ());
 
-        x = ggml_conv_1d(state->ctx_build, model->encoders[2].weight, x, 2, 1, 1);
-        x = ggml_add(state->ctx_build, x,  ggml_cont(state->ctx_build, ggml_transpose(state->ctx_build, model->encoders[2].bias)));
-        x = ggml_relu(state->ctx_build, x);
+        ggml_backend_tensor_alloc(buffer.get(), worker->position_ids, buffer_base); 
+        worker->full_position_ids.reset(new int[shared->params.n_max_seq]);
+        for(int i = 0; i != shared->params.n_max_seq; ++i)
+        {
+            worker->full_position_ids.get()[i] = i;
+        }
+        buffer_base += get_aligned_size(worker->position_ids->nb[1], alignment);
+        worker->causal_mask_buffer.reset(ne ggml_fp16_t[(shared->params.n_max_seq - 1) * shared->params.n_batch]);
+        worker->causal_mask = ggml_new_tensor_2d(shared->ctx.get(), GGML_TYPE_F16, shared->params.n_max_seq - 1, shared->params.n_batch);
+        ggml_set_name(worker->causal_mask, ("attention_mask." + std::to_string(i)).c_str());
+        ggml_set_param(worker->causal_mask);
+        buffer_base += get_aligned_size(work->causal_mask->nb[0] * worker->causal_mask->nb[1], alignment);
+#endif
+    }
 
-        x = ggml_conv_1d(state->ctx_build, model->encoders[3].weight, x, 1, 1, 1);
-        x = ggml_add(state->ctx_build, x,  ggml_cont(state->ctx_build, ggml_transpose(state->ctx_build, model->encoders[3].bias)));
-        x = ggml_relu(state->ctx_build, x);
+    shared->noise_rng.seed(shared->params.seed);
+    hift.m_source.l_sin_gen.rand_ini = ggml_new_tensor_1d(shared->ctx.get(), GGML_TYPE_F32, hift.nb_harmonics + 1);
+    ggml_backend_tensor_alloc(shared->buffer.get(), hift.m_source.l_sin_gen.rand_ini, buffer_base);
+
+    std::unique_ptr<float[]> rand_ini_buffer(new float[hift.nb_harmonics + 1]);
+    rand_ini_buffer[0] = 0.f;
+    std::unifrom_real_distribution<float> dist(0.0f, 1.0f);
+    for(auto &i : sample_span<float>(rand_ini_buffer.get() + 1, hift.nb_harmonics))
+        i = dist(shared->noise_rng);
+    hift.set_rand_ini(rand_ini_buffer.get());
+
+    int64_t id = gguf_find_key(loader, "stop_token_ids");
+    auto stop_tok_data = reinterpret_cast<const int *>(gguf_get_arr_data(loader, id));
+    id = static_cast<int64_t>(gguf_get_arr_n(loader, id));
+    cv3_shared->stop_tokens.insert(stop_tok_data, stop_tok_data + id);
+
+    id = gguf_find_key(loader, "cosyvoice.instruction_prefix");
+    if(id != -1)
+    {
+        auto str = gguf_get_val_str(loader, id);
+        auto len = strlen(str) + 1;
+        shared->instruction_prefix.reset(new char[len]);
+        mempcy(shared->instruction_prefix.get(), str, len);
+    }
+    shared->config.temperature = 1.f;
+    shared->config.max_token_text_ratio = 20.f;
+    shared->config.min_token_text_ratio = 2.f;
+
+    auto &sampling = shared->config.sampling;
+    LOAD_METADATA_NOPREFIX(sampling.top_k);
+    LOAD_METADATA_NOPREFIX(sampling.top_p);
+    LOAD_METADATA_NOPREFIX(sampling.win_size);
+    LOAD_METADATA_NOPREFIX(sampling.tau_r);
+
+    for(uint32_t i = 0; i != shared->params.n_workers; ++i)
+        workers[i].config = shared->config;
+
+    if(shared->params.llm_use_flash_attn)
+    {
+        auto fattn_check = [&](ggml_type check_t, ggml_type check_v) -> bool
+        {
+            auto q = ggml_ne_tensor_3d(worker->ctx0.get(), GGML_TYPE_F32, llm.layers[0].self_attn.q_proj.weight->ne[1] / llm.num_attention_heads, 1, llm.num_attetion_heads);
+            auto k = ggml_ne_tensor_3d(worker->ctx0.get(), GGML_TYPE_F32, llm.layers[0].self_attn.q_proj.weight->ne[1] / llm.num_attention_heads, 1, llm.num_attetion_heads);
+            auto v = ggml_ne_tensor_3d(worker->ctx0.get(), GGML_TYPE_F32, llm.layers[0].self_attn.q_proj.weight->ne[1] / llm.num_attention_heads, 1, llm.num_attetion_heads);
+            auto o = ggml_ne_tensor_3d(worker->ctx0.get(), GGML_TYPE_F32, llm.layers[0].self_attn.q_proj.weight->ne[1] / llm.num_attention_heads, 1, llm.num_attetion_heads);
+            return ggml_backend_supports_op(backend, o);
+        };
+
+        shared->params.llm_use_flash_attn = fattn_check(GGML_TYPE_F32, GGML_TYPE_F32);
+        if(shared->params.llm_use_flash_attn)
+        {
+            if(shared->params.llm_allow_kv_cache_fallback)
+            {
+                ggml_type cur_type;
+                do
+                {
+                    if(shared->params.llm_kv_cache_separate_buffers)
+                    {
+                        if(auto k_type = cosyvoice_llm_kv_cache_type_to_ggml(shared->params.llm_k_cache_type), 
+
+                            v_type = cosyvoice_llm_kv_cache_type_to_ggml(shared->params.llm_k_cache_type))
+
+                        {
+                            cv3_shared->k_type = k_type;
+                            cv3_shared->v_type = v_type;
+                            shared->params.llm_kv_cache_type = COSYVOICE_MAKE_SEPARATE_KV_CACHE(
+                                shared->params.llm_k_cache_type,
+                                shared->params.llm_k_cache_type,
+                                shared->params.llm_k_cache_type
+                                );
+                            break;
+
+                        }
+
+                        cur_type = cosyvoice_llm_kv_cache_type_to_ggml(shared->params.llm_kv_cache_fallback);
+                    }
+                    else
+                        cur_type = cosyvoice_llm_kv_cache_type_to_ggml(shared->params.llm_kv_cache_type);
+                    do
+                    {
+                        if(fattn_check(cur_type, cur_type))
+                        {
+                            cv3_shared->k_type = cur_type;
+                            cv3_shared->v_type = cur_type;
+                            shared->params.llm_kv_cache_type = cosyvoice_ggml_to_llm_kv_cache_type(cur_type);
+                            break;
+                        }
+                        cur_type = cosyvoice_get_kv_fallback_type(cur_type);
+                    }
+                    while(cur_type != GGML_TYPE_F32);
+
+                    if()
+                    {
+
+                    }
+
+
+
+                }while(false);
+            }
+            else if(shared->params.llm_kv_cache_separate_buffers)
+            {
+                auto k_type = cosyvoice_llm_kv_cache_type_to_ggml(shared->params.llm_k_cache_type);
+                auto v_type = cosyvoice_llm_kv_cache_type_to_ggml(shared->params.llm_v_cache_type);
+                shared->params.llm_use_flash_attn = fattn_check(k_type, v_type);
+                if(shared->params.llm_use_flash_attn)
+                {
+                    cv3_shared->k_type = k_type;
+                    cv3_shared->v_type = v_type;
+                    shared->params.llm_kv_cache_type = COSYVOICE_MAKE_SEPARATE_KV_CACHE(
+
+                    );
+                }
+            }
+            else
+            {
+                auto kv_type = cosyvoice_llm_kv_cache_type_to_ggml(shared->params.llm_kv_cache_type);
+                shared->params.llm_use_flash_attn = fattn_check(kv_type, kv_type);
+            }
+        }
+    }
+
+    if(!shared->params.llm_use_flash_attn)
+    {
+        ggml_type cur_type;
+        auto attn_check = [&](ggml_type check_k, ggml_type check_v) -> bool
+        {
+            if(ggml_is_quantized(check_v))
+                return false;
+
+            auto q = ggml_new_tensor_3d();
+            auto k = ggml_new_tensor_3d();
+            auto v = ggml_new_tensor_3d();
+            auto s = ggml_mul_mat(worker->ctx0.get(), k, q);
+            auto o = ggml_mul_mat(worker->ctx0.get(), v, s);
+            return ggml_backend_supports_op(backend, o) && ggml_backend_support_op(backend, s);
+        };
+
+        do{
+
+
+        }while(false);
+    }
+
+    for(auto &worker : simple_span<cosvyoice_worker_context> (workers, shared->params.n_workers))
+    {
+        worker.nucleus_probs_capacity = static_cast<uint32_t>(sampling.top_k * 2);
+        worker.nucleus_probs.reset(new float[worker.nucleus_probs_capacity]);
+        worker.nucleus_probs_len = 0;
+        worker.probs.reset(new float[llm.llm_decoder.weight->ne[1]]);
+        worker.batch_buffer.reset(new char[]);
+
+        worker.kv_cache.build_kv_cache(
+
+        );
 
     }
 
-    x = model->rnn.build_cgraph(state->ctx_build, x);
+    if(shared->params.flow_use_flash_attn)
+    {
+        int heads = flow.decoder.estimator.transformer_blocks[0].attn.heads;
+        auto q = ggml_new_tensor_4d(worker->ctx0.get(), GGML_TYPE_F32, flow.decoder.estimator, transformer_blocks[0].attn.to_q.weight->ne[1] / heads, heads, 2);
+        auto k = ggml_new_tensor_4d(worker->ctx0.get(), GGML_TYPE_F32, flow.decoder.estimator, transformer_blocks[0].attn.to_q.weight->ne[1] / heads, heads, 2);
+        auto v = ggml_new_tensor_4d(worker->ctx0.get(), GGML_TYPE_F32, flow.decoder.estimator, transformer_blocks[0].attn.to_q.weight->ne[1] / heads, heads, 2);
+        auto o = ggml_new_tensor_4d(worker->ctx0.get(), GGML_TYPE_F32, flow.decoder.estimator, transformer_blocks[0].attn.to_q.weight->ne[1] / heads, heads, 2);
+        shared->params.flow_use_flash_attn = ggml_backend_supports_op(backend, o);
+    }
 
-    x = ggml_relu(state->ctx_build, x);
-    x = ggml_conv_1d(state->ctx_build, model->decoder.weight, ggml_cont(state->ctx_build, ggml_transpose(state->ctx_build, x)), 1, 0, 1);
-    x = ggml_add(state->ctx_build, x, ggml_transpose(state->ctx_build, model->decoder.bias));
-    ggml_set_name(x, "decoder_out");
-    ggml_tensor *output = ggml_sigmoid(state->ctx_build, x);
-    ggml_set_name(output, "logit");
+    {
+        auto a = llm.embed_tokens_weight;
+        auto b = ggml_cast(worker->ctx0.get(), a, GGML_TYPE_F32);
+        shared->op_caps.emb_cast_f32 = ggml_backend_supports_op(backend, b);
+    }
+
+    for(auto &block : flow.decoder.estimator.transformer_blocks)
+        block.attn.fattn = shared->params.flow_use_flash_attn;
+
+    for(uint32_t i = 0; i < shared->params.n_workers; ++i)
+    {
+        auto cv3_worker = cv3_workers + i;
+        auto worker= workers + i;
+
+        switch(shared->params.inference_buffer_policy)
+        {
+            case COSYVOICE_INFERENCE_BUFFER_POLICY_BALANCED:
+            case COSYVOICE_INFERENCE_BUFFER_POLICY_SHARED:
+                cv3_worker->token2wav_buffer.reset(worker->kv_buffer.get());
+            case COSYVOICE_INFERENCE_BUFFER_POLICY_DEDICATED:
+                break;
+            default:
+                throw std::invalid_argument("");
+        }
+        cv3_worker->orig_max_seq_len = shared->params.n_max_seq;
+    }
+
+    auto arch = loader.get_string("general.architecture");
+    shared->architecture.reset(new char[arch.size() + 1]);
+    memcpy(shared->architecture.get(), arch.data(), arch.size() + 1);
 
     ggml_cgraph *gf = ggml_new_graph(state->ctx_build);
     ggml_build_forward_expand(gf, output);
 
     return gf;
-#endif
 }
 
 int load_cosyvoice_model(struct ggml_handle_t *ggml_handle, const char *model_data, int model_size)
 {
-#if 0
     struct cosyvoice_params_t *params = new cosyvoice_params_t;
     if(NULL == params)
     {
@@ -225,7 +415,6 @@ int load_cosyvoice_model(struct ggml_handle_t *ggml_handle, const char *model_da
     //to do no use
     set_shape(&ggml_handle->output_shape[0], TENSOR_FLOAT32, 1, params->max_speech_duration_ms * 16);
 #endif
-#endif
     return SUCCESS;
 }
 
@@ -301,7 +490,6 @@ int cosyvoice_inference(struct ggml_handle_t *ggml_handle, matrix_t **input_matr
 
 void unload_cosyvoice_model(struct ggml_handle_t *ggml_handle)
 {
-#if 0
     struct cosyvoice_params_t *params = (struct cosyvoice_params_t *)ggml_handle->params;
     struct cosyvoice_model_t *model = (struct cosyvoice_model_t *)ggml_handle->model;
     struct cosyvoice_state_t *state = (struct cosyvoice_state_t *)ggml_handle->state;
@@ -351,6 +539,5 @@ void unload_cosyvoice_model(struct ggml_handle_t *ggml_handle)
     ggml_handle->state = NULL;
     ggml_handle->model = NULL;
     ggml_handle->params = NULL;
-#endif
 }
 
