@@ -62,8 +62,9 @@ ggml_cgraph *sensevoice_build_cgraph(struct sensevoice_model_t *model, struct se
         .mem_buffer = state->build_buf,
         .no_alloc   = true,
     };
+    LOG_DEBUG("state->build_buf_size %d", state->build_buf_size);
 
-    int flash_attn = 1;
+    int flash_attn = 0;
 
     if(state->ctx_build)
         ggml_free(state->ctx_build);
@@ -80,6 +81,7 @@ ggml_cgraph *sensevoice_build_cgraph(struct sensevoice_model_t *model, struct se
     ggml_set_name(input, "feature");
     ggml_set_input(input);
 
+    LOG_DEBUG("hparams->fsmn_kernel_size %d flash_attn = %d", hparams->fsmn_kernel_size, flash_attn);
     //hparam to do 
     ggml_tensor *x = model->encoder.build_cgraph(state->ctx_build, input, hparams->fsmn_kernel_size, flash_attn);
 
@@ -91,7 +93,8 @@ ggml_cgraph *sensevoice_build_cgraph(struct sensevoice_model_t *model, struct se
     ggml_set_name(argmax_logit, "argmax_logit");
     ggml_set_output(argmax_logit);
 
-    ggml_cgraph *gf = ggml_new_graph(state->ctx_build);
+    ggml_cgraph *gf = ggml_new_graph_custom(state->ctx_build, 8192, false);
+    //ggml_cgraph *gf = ggml_new_graph_custom(state->ctx_build, 8192);
     ggml_build_forward_expand(gf, argmax_logit);
     return gf;
 }
@@ -153,6 +156,63 @@ void unload_sensevoice_model(struct ggml_handle_t *ggml_handle)
     ggml_handle->params = NULL;
 }
 
+int load_sensevoice_tokenizer()
+{
+#if 0
+    GGML_ASSERT(loader.get_string("tokenizer.model.type") == "BPE");
+
+    const auto token_idx = gguf_find_key(loader, "tokenizer.vocab.tokens");
+
+    const int* toktypes = nullptr;
+    const auto toktype_idx = gguf_find_key(loader, "tokenizer.vocab.token_types");
+    toktypes = (const int*)gguf_get_arr_data(loader, toktype_idx);
+
+    auto n_tokens = gguf_get_arr_n(loader, token_idx);
+    pimpl_->id_to_token.resize(n_tokens);
+
+    for (int i = 0; i != n_tokens; i++) {
+        std::string word = gguf_get_arr_str(loader, token_idx, i);
+        if (word.empty())
+            word = "[EMPTY_" + std::to_string(i) + "]";
+
+        pimpl_->token_to_id[word] = i;
+
+        auto& token_data = pimpl_->id_to_token[i];
+        token_data.text = std::move(word);
+        token_data.type = static_cast<token_type>(toktypes[i]);
+
+        if (token_data.type == TOKEN_TYPE_CONTROL)
+            pimpl_->cache_special_tokens.push_back(i);
+    }   
+    GGML_ASSERT(pimpl_->id_to_token.size() == pimpl_->token_to_id.size());
+
+    const auto merges_keyidx = gguf_find_key(loader, "tokenizer.model.merges");
+    const auto n_merges = gguf_get_arr_n(loader, merges_keyidx);
+    for (int i = 0; i < n_merges; i++) {
+        const std::string_view word = gguf_get_arr_str(loader, merges_keyidx, i); 
+
+        std::string_view first;
+        std::string_view second;
+
+        const size_t pos = word.find(' ', 1); 
+
+        if (pos != std::string_view::npos) {
+            first = word.substr(0, pos);
+            second = word.substr(pos + 1);
+        }
+
+        pimpl_->bpe_ranks.emplace(std::make_pair(first, second), i);
+    }
+
+    pimpl_->tokenizer = std::make_unique<llm_tokenizer_bpe>(loader);
+
+    std::sort(pimpl_->cache_special_tokens.begin(), pimpl_->cache_special_tokens.end(),
+        [&](const int a, const int b) {
+            return pimpl_->id_to_token[a].text.size() > pimpl_->id_to_token[b].text.size();
+        }
+    );
+#endif
+}
 
 int load_sensevoice_model(struct ggml_handle_t *ggml_handle, const char *model_data, int model_size)
 {
@@ -234,8 +294,7 @@ int load_sensevoice_model(struct ggml_handle_t *ggml_handle, const char *model_d
     ggml_backend_tensor_set(state->feature, zeros, 0, sizeof(zeros));
 
     /* kqv */
-
-    state->build_buf_size = ggml_graph_overhead() * GGML_DEFAULT_GRAPH_SIZE;
+    state->build_buf_size = ggml_graph_overhead() * GGML_DEFAULT_GRAPH_SIZE * 2;
     state->build_buf = malloc(state->build_buf_size);
     if(!state->build_buf)
     {
@@ -249,12 +308,17 @@ int load_sensevoice_model(struct ggml_handle_t *ggml_handle, const char *model_d
         backends,
         nullptr,
         ggml_handle->backend == ggml_handle->cpu_backend ? 1 : 2,
-        GGML_DEFAULT_GRAPH_SIZE,
+        8192, 
+        //GGML_DEFAULT_GRAPH_SIZE,
         true,
         true
     );
 
+    ggml_backend_sched_reset(state->sched);
+
     ggml_cgraph *gf = sensevoice_build_cgraph(model, state, params);
+
+    LOG_DEBUG("state->sched %p gf %p ", state->sched, gf);
     if (!ggml_backend_sched_alloc_graph(state->sched, gf))
     {
         LOG_ERROR("sched_alloc_graph error");
@@ -264,7 +328,6 @@ int load_sensevoice_model(struct ggml_handle_t *ggml_handle, const char *model_d
     //set_graph_backend(gf, state->sched, ggml_handle->backend, nullptr, -1); //to do 
 
     //to do cpu ?
-    ggml_backend_sched_reset(state->sched);
 
     ggml_handle->in_nodes = 4;
     ggml_handle->input_names[0] = strdup("speech");
@@ -311,14 +374,18 @@ int sensevoice_inference(struct ggml_handle_t *ggml_handle, matrix_t **input_mat
     struct sensevoice_state_t *state = (struct sensevoice_state_t *)ggml_handle->state;
 
     ggml_cgraph *gf = sensevoice_build_cgraph(model, state, params);
+    LOG_DEBUG("sched->galloc = %p", (void*)state->sched->galloc);
 
+    LOG_DEBUG("state->sched %p gf %p ", state->sched, gf);
     if (!ggml_backend_sched_alloc_graph(state->sched, gf))
     {
         LOG_ERROR("ggml_backend_sched_alloc_graph error");
         return ERROR;
     }
 
+
     sensevoice_frontend_process(ggml_handle, input_matrix);
+
 
 #if 0
     // set the input

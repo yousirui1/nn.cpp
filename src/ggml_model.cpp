@@ -455,6 +455,7 @@ void ggml_model_free(void *handle)
     free(ggml_handle);
 }
 
+#if 0
 int main(int argc, char *argv[])
 {
     int in_nodes, out_nodes;
@@ -484,9 +485,10 @@ int main(int argc, char *argv[])
     deinit_ggml();
     return SUCCESS;
 }
+#endif
 
 
-#if 0
+#if 1
 int main(int argc, char *argv[])
 {
     int in_nodes, out_nodes;
@@ -525,9 +527,10 @@ int main(int argc, char *argv[])
                     out_nodes, output_shape, output_matrix, 1);
 
 
-    //ggml_inference(handle, input_matrix, output_matrix, 1);
+    ggml_inference(handle, input_matrix, output_matrix, 1);
 
 
+#if 0
     //while(1)
     {
     offset = 0;
@@ -538,6 +541,7 @@ int main(int argc, char *argv[])
         //usleep(seg_time);
     }while(wav_count > seg_sample + offset);
     }
+#endif
 
     free(wav_buf);
 

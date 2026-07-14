@@ -13,22 +13,48 @@ struct sensevoice_model_t
     CTC ctc;
 };
 
+#if 0
+struct sensevoice_kv_cell_t
+{
+    int32_t pos = -1;
+    std::set<int32_t> seq_id;
+
+    bool has_seq_id(const int32_t &id) const{
+        return seq_id.find(id) != seq_id.end();
+    }
+};
+
+struct sensevoice_kv_cache_t
+{
+    uint32_t head = 0;
+    uint32_t size = 0;
+
+    // computed before each graph build
+    uint32_t n = 0;
+
+    std::vector<sensevoice_kv_cell_t> cells;
+
+    ggml_tensor *k;
+    ggml_tensor *v;
+
+    ggml_context *ctx = nullptr;
+    ggml_backend_buffer_t buffer = nullptr;
+};
+#endif
 
 struct sensevoice_state_t
 {
     ggml_backend_sched_t sched = nullptr;
-
     ggml_tensor *feature;
     
     ggml_context *ctx_build;
+
     void *build_buf;
     int build_buf_size;
 
     ggml_context *ctx_cache;
     ggml_backend_buffer_t buf_cache;
-
 };
-
 
 struct sensevoice_params_t
 {

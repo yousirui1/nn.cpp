@@ -1,3 +1,4 @@
+#if 0
 #include "base.h"
 #include "ggml_model.h"
 #include "gguf_loader.h"
@@ -541,3 +542,4 @@ void unload_cosyvoice_model(struct ggml_handle_t *ggml_handle)
     ggml_handle->params = NULL;
 }
 
+#endif

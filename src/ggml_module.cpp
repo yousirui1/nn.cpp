@@ -217,10 +217,9 @@ void LayerNorm::onload(const gguf_loader &loader, const std::string &prefix)
 ggml_tensor* LayerNorm::build_cgraph(ggml_context* ctx, ggml_tensor* x) const
 {
     x = ggml_norm(ctx, x, eps);
-
     if (weight)
     {   
-        x = ggml_mul(ctx, weight, x); 
+        x = ggml_mul(ctx,  x, weight); 
         if (bias)
             x = ggml_add(ctx, x, bias);
     }   
@@ -1216,7 +1215,9 @@ void EncoderLayerSANM::onload(const gguf_loader& loader, const std::string& pref
     LOAD_SUBMODULE(feed_forward);
 
     LOAD_SUBMODULE(norm1);
+    norm1.eps = 1e-5f;
     LOAD_SUBMODULE(norm2);
+    norm2.eps = 1e-5f;
 }
 
 ggml_tensor *EncoderLayerSANM::build_cgraph(ggml_context *ctx, ggml_tensor *x, int n_hidden_state, int n_head, int fsmn_kernel_size, int flash_attn) const
@@ -1229,6 +1230,7 @@ ggml_tensor *EncoderLayerSANM::build_cgraph(ggml_context *ctx, ggml_tensor *x, i
     }
 
     x = norm1.build_cgraph(ctx, x);
+
     x = self_attn.build_cgraph(ctx, x, n_hidden_state, n_head, fsmn_kernel_size, flash_attn);
 
     if(norm1.weight->ne[0] == norm2.weight->ne[0])
@@ -1241,6 +1243,8 @@ ggml_tensor *EncoderLayerSANM::build_cgraph(ggml_context *ctx, ggml_tensor *x, i
             ggml_new_tensor_3d(ctx, GGML_TYPE_F32, x->ne[0], x->ne[1], x->ne[2]));
 
     x = norm2.build_cgraph(ctx, x);
+    
+
     x = feed_forward.build_cgraph(ctx, x);
 
     // residual after position wise feed forward

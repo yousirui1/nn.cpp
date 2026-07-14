@@ -80,7 +80,8 @@ struct Linear : BasicModule
 
 struct LayerNorm : BasicModule
 {
-    constexpr static float eps = 1e-6f;
+    //constexpr static float eps = 1e-6f;
+    float eps = 1e-6f;
     void onload(const gguf_loader &loader, const std::string &prefix);
     ggml_tensor* build_cgraph(ggml_context* ctx, ggml_tensor* x) const;
 };

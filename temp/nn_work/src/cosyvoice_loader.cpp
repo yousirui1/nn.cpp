@@ -381,7 +381,7 @@ void CausalHiFTGenerator::OnLoad(const gguf_loader& loader, const std::string& p
 		LOAD_SUBMODULE_EX(("source_resblocks." + std::to_string(layer_idx)).c_str(), source_resblocks[layer_idx]);
 	}
 
-	ayers *= num_kernels;
+	layers *= num_kernels;
 	resblocks.resize(layers);
 	for (size_t i = 0; i != layers; ++i)
 		LOAD_SUBMODULE_EX(("resblocks." + std::to_string(i)).c_str(), resblocks[i]);
