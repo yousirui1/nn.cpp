@@ -104,7 +104,7 @@ int load_silero_model(struct ggml_handle_t *ggml_handle, const char *model_data,
     if(model_size > 0)
     {
         model = (struct silero_model_t *)((struct ggml_handle_t *)model_data)->model;
-        ggml_handle->is_dup = 1;
+        ggml_handle->is_model_alloc = 0;
     }
     else
     {
@@ -160,7 +160,7 @@ int load_silero_model(struct ggml_handle_t *ggml_handle, const char *model_data,
             tensors.insert(std::move(kv));
 
         ggml_model_weight_alloc(model->ctx, ggml_handle->backend, model->buf_weights, tensors);
-        ggml_handle->is_dup = 0;
+        ggml_handle->is_model_alloc = 1;
     }
 
     /* cache */
@@ -341,7 +341,7 @@ int silero_backend_process(struct ggml_handle_t *ggml_handle, float speech_prob)
 
 
 int silero_inference(struct ggml_handle_t *ggml_handle, matrix_t **input_matrix,
-                        matrix_t **output_matrix, void *param)
+                        matrix_t **output_matrix)
 {
 
     struct silero_params_t *params = (struct silero_params_t *)ggml_handle->params;
@@ -425,17 +425,15 @@ void unload_silero_model(struct ggml_handle_t *ggml_handle)
     }   
 
     memset(state, 0, sizeof(struct silero_state_t));
-    if(model && !ggml_handle->is_dup)
-    {
-        if(model->buf_weights)
-        {
-            ggml_backend_buffer_free(model->buf_weights);
-        }
 
-        if(model->ctx)
-        {
-            ggml_free(model->ctx);
-        }
+    if(model->buf_weights)
+    {
+        ggml_backend_buffer_free(model->buf_weights);
+    }
+
+    if(model->ctx)
+    {
+        ggml_free(model->ctx);
     }
     memset(model, 0, sizeof(struct silero_model_t));
 

@@ -11,10 +11,8 @@
 #include <ggml.h>
 #include <ggml-alloc.h>
 #include <ggml-backend.h>
-#include "ggml_fft.h"
-#include "gguf_loader.h"
 
-//struct gguf_loader;
+struct gguf_loader;
 
 struct ggml_backend_op_capabilities_t
 {
@@ -82,10 +80,10 @@ struct Linear : BasicModule
 
 struct LayerNorm : BasicModule
 {
-    constexpr static float eps = 1e-6f;
+    //constexpr static float eps = 1e-6f;
+    float eps = 1e-6f;
     void onload(const gguf_loader &loader, const std::string &prefix);
     ggml_tensor* build_cgraph(ggml_context* ctx, ggml_tensor* x) const;
-    ggml_tensor* build_cgraph(ggml_context* ctx, ggml_tensor* x, float _eps) const;
 };
 
 struct Conv1d : BasicModule
@@ -514,10 +512,8 @@ struct CausalHiFTGenerator : Module
     int nfft;
     int hop_len;
 
-    //to do 
-    fft_context_ptr fctx; 
-    istft_context_ptr ictx;
-
+    //void fft_handle
+    //void ifft_handle 
 
     ggml_tensor *window;
     CausalConvRNNF0Predictor f0_predictor;
@@ -529,7 +525,6 @@ struct CausalHiFTGenerator : Module
     std::vector<ResBlock> resblocks;
     CausalConv1d conv_post;
 
-    void set_rand_ini(const float* data) const;
     void onload(const gguf_loader &loader, const std::string &prefix);
     std::array<ggml_tensor *, 2> build_cgraph(ggml_context *ctx, ggml_tensor *speech_feat) const;
 };
@@ -544,13 +539,13 @@ struct CosyVoice3LM : Module
     int sos_token_id;
     int task_token_id;
 
-    ggml_tensor *embed_tokens_weight;
+    ggml_tensor *embed_token_weight;
     ggml_tensor *speech_embedding_weight;
     std::vector<Qwen2DecoderLayer> layers;
     Qwen2RMSNorm norm;
     Linear llm_decoder;
 
-    void onload(const gguf_loader& loader, const std::string& prefix);
+    //void onload(const gguf_loader &loader, const std::string &prefix, const cosyvoice3_llm_params_t &params);
 
 };
 

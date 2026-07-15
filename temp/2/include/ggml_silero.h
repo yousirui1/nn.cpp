@@ -52,7 +52,7 @@ struct silero_params_t
 /* vad_silero */
 int load_silero_model(struct ggml_handle_t *ggml_handle, const char *model_data, int model_size);
 int silero_inference(struct ggml_handle_t *ggml_handle, matrix_t **input_matrix,
-                        matrix_t **output_matrix, void *param);
+                        matrix_t **output_matrix);
 
 void unload_silero_model(struct ggml_handle_t *ggml_handle);
 

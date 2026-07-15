@@ -2,7 +2,6 @@
 #include "span_compat.h"
 #include "gguf_loader.h"
 #include "ggml_module.h"
-#include "ggml_cpu_flag.h"
 
 static void split_tensor(ggml_context *ctx, ggml_tensor *tensor, int dim, ggml_tensor **tensors, uint16_t chunks)
 {
@@ -227,69 +226,64 @@ ggml_tensor* LayerNorm::build_cgraph(ggml_context* ctx, ggml_tensor* x) const
     return x;
 }
 
-ggml_tensor* LayerNorm::build_cgraph(ggml_context* ctx, ggml_tensor* x, float _eps) const
-{
-    x = ggml_norm(ctx, x, _eps);
-    if (weight)
-    {   
-        x = ggml_mul(ctx,  x, weight); 
-        if (bias)
-            x = ggml_add(ctx, x, bias);
-    }   
-    return x;
-}
-
-ggml_tensor* Conv1d::build_cgraph(ggml_context* ctx, ggml_tensor* x, int s, int p, int d, int g, ggml_backend_op_capabilities_t capabilities) const
+ggml_tensor *Conv1d::build_cgraph(ggml_context *ctx, ggml_tensor *x, int s, int p, int d, int g, ggml_backend_op_capabilities_t capabilities) const
 {
     GGML_ASSERT(g >= 1);
     GGML_ASSERT(x->ne[3] == 1 && weight->ne[3] == 1);
 
-    ggml_tensor* im2col;
-    ggml_tensor* weight = this->weight;
-    // Backends without F16 IM2COL support (e.g. Metal) need F32 input + F32/F16
-    // output and contiguous src[1]. Fall back only when the probe says so.
+    ggml_tensor *im2col;
+    ggml_tensor *weight = this->weight;
+
+    /* Backends without F16 IM2COL support (e.g. Metal) need F32 input + F32/F16
+     * output and contiguous src[1]. Fall back only when the probe says so 
+     */
     const bool needs_f32_fallback = !capabilities.im2col_f16;
-    if (needs_f32_fallback && x->type == GGML_TYPE_F16)
+    if(needs_f32_fallback && x->type == GGML_TYPE_F16)
         x = ggml_cast(ctx, x, GGML_TYPE_F32);
-    if (g != 1)
+    if(1 != g)
     {
         GGML_ASSERT(weight->ne[2] % g == 0 && weight->ne[1] * g == x->ne[1]);
 
-        auto xs = reinterpret_cast<ggml_tensor**>(alloca(sizeof(ggml_tensor*) * g));
-        auto ws = reinterpret_cast<ggml_tensor**>(alloca(sizeof(ggml_tensor*) * g));
-        if (needs_f32_fallback && weight->type == GGML_TYPE_F16)
+        auto xs = reinterpret_cast<ggml_tensor **>(alloca(sizeof(ggml_tensor *) * g));
+        auto ws = reinterpret_cast<ggml_tensor **>(alloca(sizeof(ggml_tensor *) * g));
+        if(needs_f32_fallback && weight->type == GGML_TYPE_F16)
             weight = ggml_cast(ctx, weight, GGML_TYPE_F32);
+
         split_tensor(ctx, x, 1, xs, g);
         split_tensor(ctx, weight, 2, ws, g);
         const auto out_type = needs_f32_fallback ? GGML_TYPE_F32 : weight->type;
-        for (int i = 0; i != g; i++)
-            xs[i] = unsqueeze(ctx,
-                ggml_im2col(ctx,
-                    ws[i],
-                    ggml_cont(ctx, xs[i]),
-                    s, 0, p, 0, d, 0,
-                    false, out_type),
-                2);
+
+        for(int i = 0; i != g; i ++)
+        {
+            xs[i] = unsqueeze(ctx, 
+                        ggml_im2col(ctx,
+                            ws[i],
+                            ggml_cont(ctx, xs[i]),
+                            s, 0, p, 0, d, 0,
+                            false, out_type),
+                        2);
+        }
         im2col = concat_tensors(ctx, xs, g, 2, capabilities);
     }
     else
     {
-        const auto out_type = needs_f32_fallback
+        const auto out_type = needs_f32_fallback 
             ? ((weight->type == GGML_TYPE_F16) ? GGML_TYPE_F16 : GGML_TYPE_F32)
             : weight->type;
         im2col = ggml_im2col(ctx, weight, x, s, 0, p, 0, d, 0, false, out_type);
-        if (im2col->ne[1] > 0xFFFF)
+        if(im2col->ne[1] > 0xFFFF)
         {
-            // Split the im2col output along the output-width dimension.
-            // Keep the op as GGML_OP_IM2COL until graph allocation, then switch to
-            // GGML_OP_NONE. This avoids a GGML allocation-size bug that can reserve
-            // much more memory than necessary.
+            /* Split the im2col output along the output-width dimension.
+             * Keep the op as GGML_OP_IM2COL until graph allocation, then switch to
+             * GGML_OP_NONE. This avoids a GGML allocation-size bug that can reserve
+             * much more memory than necessary.
+             */
             constexpr int chunk_max_size = 65528;
             auto prev_chunk = im2col;
             memset(im2col->op_params, 0, sizeof(im2col->op_params));
             memset(im2col->src, 0, sizeof(im2col->src));
 
-            for (int64_t start = 0; start < im2col->ne[1]; start += chunk_max_size)
+            for(int64_t start = 0; start < im2col->ne[1]; start += chunk_max_size)
             {
                 auto end = std::min(im2col->ne[1], start + chunk_max_size);
 
@@ -324,30 +318,29 @@ ggml_tensor* Conv1d::build_cgraph(ggml_context* ctx, ggml_tensor* x, int s, int 
                 chunk_im2col->src[2] = prev_chunk;
                 prev_chunk = chunk_im2col;
             }
-
             im2col = view_tensor(ctx, im2col, prev_chunk);
         }
     }
 
     weight = ggml_reshape_3d(ctx, weight, weight->ne[0] * weight->ne[1], weight->ne[2] / g, g);
-    if (x->ne[2] != 1)
-        if (weight->type == GGML_TYPE_F16 && !capabilities.repeat_f16)
+    if(1 != x->ne[2])
+    {
+        if(weight->type == GGML_TYPE_F16 && !capabilities.repeat_f16)
         {
             weight->ne[3] = x->ne[2];
             weight->nb[3] = 0;
         }
         else
             weight = ggml_repeat_4d(ctx, weight, weight->ne[0], weight->ne[1], g, x->ne[2]);
-
-    ggml_tensor* result = ggml_mul_mat(ctx, im2col, weight);
+    }
+    ggml_tensor *result = ggml_mul_mat(ctx, im2col, weight);
     result = ggml_reshape_3d(ctx, result, im2col->ne[1], this->weight->ne[2], x->ne[2]);
 
-    if (bias)
+    if(bias)
         result = ggml_add(ctx, result, unsqueeze(ctx, bias, 0));
 
     return result;
 }
-#if 0
 
 int CausalConv1d::causal_padding() const
 {
@@ -408,69 +401,6 @@ ggml_tensor *CausalConvRNNF0Predictor::build_cgraph(ggml_context *ctx, ggml_tens
     x = classifier.build_cgraph(ctx, x);
     x = ggml_reshape_2d(ctx, x, x->ne[1], x->ne[2]);
 
-    return ggml_abs(ctx, x);
-}
-#endif
-
-int CausalConv1d::causal_padding() const
-{
-    const auto kernel_size = weight->ne[0];
-    const auto causal_padding = static_cast<int>((kernel_size * d - d) / 2 * 2 + (kernel_size + 1) % 2);
-    return causal_padding;
-}
-
-ggml_tensor* CausalConv1d::build_cgraph(ggml_context* ctx, ggml_tensor* x) const
-{
-    if (!ggml_is_contiguous(x))
-        x = ggml_cont(ctx, x);
-    if (causal_type == left)
-        x = ggml_pad_ext(ctx, x, causal_padding(), 0, 0, 0, 0, 0, 0, 0);
-    else if (causal_type == right)
-        x = ggml_pad_ext(ctx, x, 0, causal_padding(), 0, 0, 0, 0, 0, 0);
-    else
-        GGML_ABORT("CausalConv1d: invalid causal type %d", static_cast<int>(causal_type));
-
-    x = Conv1d::build_cgraph(ctx, x, 1, 0, d, 1, {});
-    return x;
-}
-
-void CausalConvRNNF0Predictor::onload(const gguf_loader& loader, const std::string& prefix)
-{
-    LOAD_SUBMODULE_EX("condnet.0", condnet_0);
-    LOAD_SUBMODULE_EX("condnet.2", condnet_2);
-    LOAD_SUBMODULE_EX("condnet.4", condnet_4);
-    LOAD_SUBMODULE_EX("condnet.6", condnet_6);
-    LOAD_SUBMODULE_EX("condnet.8", condnet_8);
-    LOAD_SUBMODULE(classifier);
-}
-
-
-CausalConvRNNF0Predictor::CausalConvRNNF0Predictor()
-{
-    condnet_0.causal_type = CausalConv1d::right;
-    condnet_2.causal_type = CausalConv1d::left;
-    condnet_4.causal_type = CausalConv1d::left;
-    condnet_6.causal_type = CausalConv1d::left;
-    condnet_8.causal_type = CausalConv1d::left;
-}
-
-ggml_tensor* CausalConvRNNF0Predictor::build_cgraph(ggml_context* ctx, ggml_tensor* x) const
-{
-    x = condnet_0.build_cgraph(ctx, x);
-    x = ggml_elu(ctx, x);
-    x = condnet_2.build_cgraph(ctx, x);
-    x = ggml_elu(ctx, x);
-    x = condnet_4.build_cgraph(ctx, x);
-    x = ggml_elu(ctx, x);
-    x = condnet_6.build_cgraph(ctx, x);
-    x = ggml_elu(ctx, x);
-    x = condnet_8.build_cgraph(ctx, x);
-    x = ggml_elu(ctx, x);
-
-    x = ggml_permute(ctx, x, 1, 0, 2, 3);
-    x = ggml_cont(ctx, x);
-    x = classifier.build_cgraph(ctx, x);
-    x = ggml_reshape_2d(ctx, x, x->ne[1], x->ne[2]);
     return ggml_abs(ctx, x);
 }
 
@@ -771,18 +701,18 @@ void CTC::onload(const gguf_loader &loader, const std::string &prefix)
 std::array<ggml_tensor *, 2> CTC::build_cgraph(ggml_context *ctx, ggml_tensor *encoder_out) const
 {
     // Reshape encoder_out to merge batch and time dimensions
-    ggml_tensor *x;
+    ggml_tensor *x ;
     {
-        x = ggml_reshape_2d(ctx, encoder_out, encoder_out->ne[0], encoder_out->ne[1] * encoder_out->ne[2]);
+        ggml_reshape_2d(ctx, encoder_out, encoder_out->ne[0], encoder_out->ne[1] * encoder_out->ne[2]);
         x = ggml_mul_mat(ctx, weight, x);
         x = ggml_add(ctx, x, bias);
         // Reshape back to 3D
         x = ggml_reshape_3d(ctx, x, x->ne[0], encoder_out->ne[1], encoder_out->ne[2]);
     }
 
-    ggml_tensor * probs = ggml_soft_max(ctx, x);
+    ggml_tensor *probs = ggml_soft_max(ctx, x);
     probs = ggml_reshape_2d(ctx, probs, probs->ne[0], probs->ne[1] * probs->ne[2] * probs->ne[3]);
-    ggml_tensor * argmax_logit = ggml_argmax(ctx, probs);
+    ggml_tensor *argmax_logit = ggml_argmax(ctx, probs);
     argmax_logit = ggml_reshape_3d(ctx, argmax_logit, x->ne[1], x->ne[2], x->ne[3]);
     return {probs, argmax_logit};
 }
@@ -1087,7 +1017,6 @@ ggml_tensor *DiT::build_cgraph(ggml_context *ctx, ggml_tensor *x, ggml_tensor *m
     ggml_tensor *position_ids = ggml_new_tensor_2d(ctx, GGML_TYPE_I32, x->ne[1], x->ne[2]);
     ggml_set_input(position_ids);
     ref_position_ids = position_ids;
-    position_ids = ggml_dup(ctx, position_ids);
 
     for (const auto& block : simple_span<const DiTBlock>(transformer_blocks.data(), transformer_blocks.size() - 1))
         x = block.build_cgraph(ctx, x, t, position_ids, 0);
@@ -1108,7 +1037,6 @@ void CausalConditionalCFM::onload(const gguf_loader &loader, const std::string &
     for(int i = 0; i != 11; i++)
         t_span[i] = 1.f - std::cos(0.1f * 0.5f * 3.14159265358979323846f * i);
 }
-
 
 CausalConditionalCFM::DiTContext CausalConditionalCFM::prepare_context(ggml_context *ctx, ggml_tensor *mu, ggml_tensor *spks, ggml_tensor *cond) const 
 {
@@ -1181,7 +1109,6 @@ ggml_tensor* CausalConditionalCFM::build_cgraph_one_step(ggml_context* ctx,
     return x;
 }
 
-
 void PreLookaheadLayer::onload(const gguf_loader &loader, const std::string &prefix)
 {
     LOAD_METADATA(pre_lookahead_len);
@@ -1196,7 +1123,7 @@ ggml_tensor *PreLookaheadLayer::build_cgraph(ggml_context *ctx, ggml_tensor *inp
     outputs = ggml_cont(ctx, outputs);
     outputs = ggml_pad(ctx, outputs, pre_lookahead_len, 0, 0, 0);
     outputs = conv1.build_cgraph(ctx, outputs, 1, 0, 1, 1, {});
-    outputs = ggml_leaky_relu(ctx, outputs, 0.01f, false);
+    outputs = ggml_leaky_relu(ctx, outputs, 0.0f, false);
 
     outputs = ggml_pad_ext(ctx, outputs, static_cast<int>(conv2.weight->ne[0] - 1), 0, 0, 0, 0, 0, 0, 0);
     outputs = conv2.build_cgraph(ctx, outputs, 1, 0, 1, 1, {});
@@ -1262,6 +1189,7 @@ void SourceModuleHnNSF::onload(const gguf_loader &loader, const std::string &pre
 }
 
 std::array<ggml_tensor*, 2> SourceModuleHnNSF::build_cgraph(ggml_context* ctx, ggml_tensor* x, int harmonic_num, int sampling_rate, int upsample_scale, float sine_amp, int voiced_threshold, float noise_std) const
+
 {
     auto [sine_wavs, noise] = l_sin_gen.build_cgraph(ctx, x, harmonic_num, sampling_rate, upsample_scale, sine_amp, voiced_threshold, noise_std);
     auto sine_merge = l_linear.build_cgraph(ctx, sine_wavs);
@@ -1287,7 +1215,9 @@ void EncoderLayerSANM::onload(const gguf_loader& loader, const std::string& pref
     LOAD_SUBMODULE(feed_forward);
 
     LOAD_SUBMODULE(norm1);
+    norm1.eps = 1e-5f;
     LOAD_SUBMODULE(norm2);
+    norm2.eps = 1e-5f;
 }
 
 ggml_tensor *EncoderLayerSANM::build_cgraph(ggml_context *ctx, ggml_tensor *x, int n_hidden_state, int n_head, int fsmn_kernel_size, int flash_attn) const
@@ -1383,7 +1313,7 @@ void SenseVoiceEncoderSmall::onload(const gguf_loader &loader, std::string prefi
     LOAD_SUBMODULE(after_norm);
     LOAD_SUBMODULE(tp_norm);
 
-    //LOG_DEBUG("SenseVoiceEncoderSmall output_size %d linear_units %d attention_heads %d num_blocks %d tp_blocks %d ", output_size, linear_units, attention_heads, num_blocks, tp_blocks);
+    LOG_DEBUG("SenseVoiceEncoderSmall output_size %d linear_units %d attention_heads %d num_blocks %d tp_blocks %d ", output_size, linear_units, attention_heads, num_blocks, tp_blocks);
 
     prefix = "encoder.encoders0";
     for(int i = 0; i < 1; i++)
@@ -1467,7 +1397,7 @@ CausalMaskedDiffWithDiT::EncodeResult CausalMaskedDiffWithDiT::build_cgraph_enco
     };
 }
 
-void CausalHiFTGenerator::onload(const gguf_loader& loader, const std::string& prefix)
+void CausalHiFTGenerator::onload(const gguf_loader &loader, const std::string &prefix)
 {
     LOAD_SUBMODULE(f0_predictor);
     LOAD_SUBMODULE(m_source);
@@ -1475,7 +1405,7 @@ void CausalHiFTGenerator::onload(const gguf_loader& loader, const std::string& p
     conv_pre.causal_type = CausalConv1d::causal_type_t::right;
 
     int num_kernels;
-    GGML_ASSERT(loader.get_metadata("sample_rate", reinterpret_cast<uint32_t&>(sampling_rate)));
+    GGML_ASSERT(loader.get_metadata("sample_rate", reinterpret_cast<uint32_t &>(sampling_rate)));
     LOAD_METADATA(num_kernels);
     LOAD_METADATA(nb_harmonics);
     LOAD_METADATA(nsf_alpha);
@@ -1491,33 +1421,35 @@ void CausalHiFTGenerator::onload(const gguf_loader& loader, const std::string& p
     GGML_ASSERT(gguf_get_arr_type(loader.gguf_ctx, id) == GGUF_TYPE_INT32);
 
     auto layers = gguf_get_arr_n(loader.gguf_ctx, id);
-    auto upsample_rates = reinterpret_cast<const int*>(gguf_get_arr_data(loader.gguf_ctx, id));
+    auto upsample_rates = reinterpret_cast<const int *>(gguf_get_arr_data(loader.gguf_ctx, id));
 
     ups.resize(layers);
     scale_factor = hop_len;
-    for (size_t i = 0; i != layers; ++i)
+
+    for(size_t i = 0; i != layers; ++i)
     {
-        auto& up = ups[i];
+        auto &up = ups[i];
         int upsample_rate = upsample_rates[i];
         scale_factor *= upsample_rate;
         up.s = upsample_rate;
         LOAD_SUBMODULE_EX(("ups." + std::to_string(i)).c_str(), up);
     }
-    
+
     source_downs.resize(layers);
     source_resblocks.resize(layers);
-    for (size_t i = 0; i != layers - 1; ++i)
+    for(size_t i = 0; i != layers - 1; ++i)
     {
         auto down = new CausalConv1dDownSample;
         down->s = 1;
-        for (size_t j = layers - 1; j > i; --j)
+        for(size_t j = layers - 1; j > i; --j)
             down->s *= upsample_rates[j];
         source_downs[i].reset(down);
 
         LOAD_SUBMODULE_EX(("source_downs." + std::to_string(i)).c_str(), *down);
         LOAD_SUBMODULE_EX(("source_resblocks." + std::to_string(i)).c_str(), source_resblocks[i]);
     }
-    // Final block.
+
+    /* Final block */
     {
         const auto layer_idx = layers - 1;
         auto conv = new CausalConv1d;
@@ -1531,75 +1463,12 @@ void CausalHiFTGenerator::onload(const gguf_loader& loader, const std::string& p
 
     layers *= num_kernels;
     resblocks.resize(layers);
-    for (size_t i = 0; i != layers; ++i)
+    for(size_t i = 0; i != layers; ++i)
         LOAD_SUBMODULE_EX(("resblocks." + std::to_string(i)).c_str(), resblocks[i]);
 
     LOAD_SUBMODULE(conv_post);
     conv_post.causal_type = CausalConv1d::causal_type_t::left;
 }
-
-std::array<ggml_tensor*, 2> CausalHiFTGenerator::build_cgraph(ggml_context* ctx, ggml_tensor* speech_feat) const
-{
-    auto f0 = f0_predictor.build_cgraph(ctx, speech_feat);
-    auto s_input = ggml_permute(ctx, f0, 1, 0, 2, 3);
-    s_input = ggml_interpolate(ctx, s_input, s_input->ne[0], s_input->ne[1] * scale_factor, s_input->ne[2], 1, GGML_SCALE_MODE_NEAREST);
-    auto [s, noise] = m_source.build_cgraph(ctx, s_input, nb_harmonics, sampling_rate, scale_factor, nsf_alpha, nsf_voiced_threshold, nsf_sigma);
-    s = ggml_permute(ctx, s, 1, 0, 2, 3);
-
-    // decode
-    ggml_tensor* x;
-    {
-        x = conv_pre.build_cgraph(ctx, speech_feat);
-
-        auto s_stft = ggml_stft(ctx, s, window, hop_len, true, fctx.get());
-        s_stft = ggml_cont(ctx, s_stft);
-        s_stft = ggml_reshape_2d(ctx, s_stft, s_stft->ne[0], s_stft->ne[1] * 2);
-
-        const auto num_upsamples = ups.size();
-        const auto num_kernels = resblocks.size() / num_upsamples;
-        for (size_t i = 0; i != num_upsamples; ++i)
-        {
-            x = ggml_leaky_relu(ctx, x, lrelu_slope, false);
-            x = ups[i].build_cgraph(ctx, x);
-
-            if (i == num_upsamples - 1)
-                x = ggml_pad_reflect_1d(ctx, x, 1, 0);
-
-            auto si = source_downs[i]->build_cgraph(ctx, s_stft);
-            si = source_resblocks[i].build_cgraph(ctx, si);
-            x = ggml_add(ctx, x, si);
-
-            auto xs = resblocks[i * num_kernels].build_cgraph(ctx, x);
-            for (size_t j = 1; j != num_kernels; ++j)
-                xs = ggml_add(ctx, xs,
-                    resblocks[i * num_kernels + j].build_cgraph(ctx, x));
-            x = ggml_scale(ctx, xs, 1.f / num_kernels);
-        }
-        x = ggml_leaky_relu(ctx, x, 0.01f, false);
-        x = conv_post.build_cgraph(ctx, x);
-
-        auto magnitude = ggml_view_3d(ctx, x, x->ne[0], nfft / 2 + 1, x->ne[2], x->nb[1], x->nb[2], 0);
-        magnitude = ggml_exp(ctx, magnitude);
-        auto phase = ggml_view_3d(ctx, x, x->ne[0], nfft / 2 + 1, x->ne[2], x->nb[1], x->nb[2], (nfft / 2 + 1) * x->nb[1]);
-        phase = ggml_sin(ctx, phase);
-
-        // istft
-        {
-            magnitude = ggml_clamp(ctx, magnitude, 0.f, 1e2f);
-            auto real = ggml_mul(ctx, magnitude,
-                ggml_cos(ctx, phase));
-            auto imag = ggml_mul(ctx, magnitude,
-                ggml_sin(ctx, phase));
-
-            x = ggml_istft(ctx, real, imag, window, hop_len, true, ictx.get());
-            x = ggml_clamp(ctx, x, -audio_limit, audio_limit);
-            ggml_set_cpu(x);
-            return { x, noise };
-        }
-    }
-}
-
-#if 0
 
 std::array<ggml_tensor *, 2>CausalHiFTGenerator::build_cgraph(ggml_context *ctx, ggml_tensor *speech_feat) const
 {
@@ -1615,9 +1484,10 @@ std::array<ggml_tensor *, 2>CausalHiFTGenerator::build_cgraph(ggml_context *ctx,
     {
         x = conv_pre.build_cgraph(ctx, speech_feat);
 
-		auto s_stft = ggml_stft(ctx, s, window, hop_len, true, fctx.get());
-		s_stft = ggml_cont(ctx, s_stft);
-		s_stft = ggml_reshape_2d(ctx, s_stft, s_stft->ne[0], s_stft->ne[1] * 2);
+        // todo
+        //auto s_stft = ggml_stft(ctx, s, window, hop_len, true, 
+        //s_stft
+        //s_stft
 
         const auto num_upsamples = ups.size();
         const auto num_kernels = resblocks.size() / num_upsamples;
@@ -1629,9 +1499,10 @@ std::array<ggml_tensor *, 2>CausalHiFTGenerator::build_cgraph(ggml_context *ctx,
             if(i == num_upsamples -1)
                 x = ggml_pad_reflect_1d(ctx, x, 1, 0);
 
-			auto si = source_downs[i]->build_cgraph(ctx, s_stft);
-			si = source_resblocks[i].build_cgraph(ctx, si);
-			x = ggml_add(ctx, x, si);
+            // to do 
+            //auto si = source_downs[i]->build_cgraph(ctx, s_stft);
+            //si = source_resblocks[i].build_cgraph(ctx, si);
+            //x = ggml_add(ctx, x, si);
 
             auto xs = resblocks[i * num_kernels].build_cgraph(ctx, x);
             for(size_t j = 1; j != num_kernels; ++j)
@@ -1641,7 +1512,7 @@ std::array<ggml_tensor *, 2>CausalHiFTGenerator::build_cgraph(ggml_context *ctx,
             }
             x = ggml_scale(ctx, xs, 1.f / num_kernels);
         }
-        x = ggml_leaky_relu(ctx, x, 0.01f, false);
+        x = ggml_leaky_relu(ctx, x, 0.0f, false);
         x = conv_post.build_cgraph(ctx, x);
 
         auto magnitude = ggml_view_3d(ctx, x, x->ne[0], nfft / 2 + 1, x->ne[2], x->nb[1], x->nb[2], 0);
@@ -1650,7 +1521,8 @@ std::array<ggml_tensor *, 2>CausalHiFTGenerator::build_cgraph(ggml_context *ctx,
         phase = ggml_sin(ctx, phase);
         /* istft */
         {
-            magnitude = ggml_clamp(ctx, magnitude, 0.f, 1e2f);
+#if 0
+            magnitude = ggml_clamp(ctx, magnitude, 0.f 1e2f);
             auto real = ggml_mul(ctx, magnitude, ggml_cos(ctx, phase));
             auto imag = ggml_mul(ctx, magnitude, ggml_sin(ctx, phase));
 
@@ -1658,14 +1530,15 @@ std::array<ggml_tensor *, 2>CausalHiFTGenerator::build_cgraph(ggml_context *ctx,
             x = ggml_clamp(ctx, x, -audio_limit, audio_limit);
             ggml_set_cpu(x);
             return {x, noise};
+#endif
         }
     }
 }
-#endif
 
-
-void CosyVoice3LM::onload(const gguf_loader &loader, const std::string &prefix)
+#if 0
+void Cosyvoice3LM::onload(const gguf_loader &loader, const std::string &prefix)
 {
+#if 0
     int num_hidden_layers;
 
     LOAD_TENSOR_EX("embed_tokens.weight", embed_tokens_weight);
@@ -1691,6 +1564,7 @@ void CosyVoice3LM::onload(const gguf_loader &loader, const std::string &prefix)
         auto name = layers_prefix + "." + std::to_string(i);
         LOAD_SUBMODULE_EX(name.c_str(), layer);
     }
+#endif
 }
-
+#endif
 
