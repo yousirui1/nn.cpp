@@ -1,7 +1,7 @@
 #ifndef __GGML_FSMN_H__
 #define __GGML_FSMN_H__
 
-#include "ggml_module.hpp"
+#include "ggml_module.h"
 
 #define FSMN_MAX_NODES 8192
 #define VAD_CHUNK_SIZE 800
@@ -37,7 +37,7 @@ struct fsmn_params_t
     int lfr_m;
     int lfr_n;
 
-    uint32_t n_encoder_layer;   
+    uint32_t n_encoder_layer;
 
     int32_t min_speech_duration_ms;
     int32_t max_speech_duration_ms;

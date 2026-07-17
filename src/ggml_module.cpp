@@ -182,16 +182,6 @@ static struct ggml_tensor * ggml_mul_mat_pad(struct ggml_context * ctx, struct g
 #define ggml_mul_mat ggml_mul_mat_pad
 #endif
 
-#if 0
-ggml_tensor *ggml_fft(ggml_context *ctx, ggml_tensor *a, fft_context_t *fft_ctx)
-{
-    GGML_ASSERT(ggml_is_matrix(a));
-    GGML_ASSERT(a->ne[0] == fft_ctx->nfft);
-    GGML_ASSERT(ggml_is_contiguous(a));
-
-    //return ggml_custom_4d(ctx, a->type, fft_ctx->nfft, a->ne[1], 2, 1, &a, 1, reinterpret_cast<ggml_custom_op_t>(ggml_fft_op)
-}
-#endif
 
 void Module::onload(const gguf_loader& loader, const std::string& prefix) {}
 
@@ -347,70 +337,6 @@ ggml_tensor* Conv1d::build_cgraph(ggml_context* ctx, ggml_tensor* x, int s, int 
 
     return result;
 }
-#if 0
-
-int CausalConv1d::causal_padding() const
-{
-    const auto kernel_size = weight->ne[0];
-    const auto causal_padding = static_cast<int>((kernel_size * d - d) / 2 * 2 + (kernel_size + 1) % 2);
-    return causal_padding;
-}
-
-ggml_tensor *CausalConv1d::build_cgraph(ggml_context *ctx, ggml_tensor *x) const
-{
-    if(!ggml_is_contiguous(x))
-        x = ggml_cont(ctx, x);
-    if(left == causal_type)
-        x = ggml_pad_ext(ctx, x, causal_padding(), 0, 0, 0, 0, 0, 0, 0);
-    else if(right == causal_type)
-        x = ggml_pad_ext(ctx, x, 0, causal_padding(), 0, 0, 0, 0, 0, 0);
-    else 
-        GGML_ABORT("CausalConv1d: invalid causal type %d", static_cast<int>(causal_type));
-
-    x = Conv1d::build_cgraph(ctx, x, 1, 0, d, 1, {});
-    return x;
-}
-
-CausalConvRNNF0Predictor::CausalConvRNNF0Predictor()
-{
-    condnet_0.causal_type = CausalConv1d::right;
-    condnet_2.causal_type = CausalConv1d::left;
-    condnet_4.causal_type = CausalConv1d::left;
-    condnet_6.causal_type = CausalConv1d::left;
-    condnet_8.causal_type = CausalConv1d::left;
-}
-
-void CausalConvRNNF0Predictor::onload(const gguf_loader &loader, const std::string &prefix)
-{
-    LOAD_SUBMODULE_EX("condnet.0", condnet_0);
-    LOAD_SUBMODULE_EX("condnet.2", condnet_0);
-    LOAD_SUBMODULE_EX("condnet.4", condnet_0);
-    LOAD_SUBMODULE_EX("condnet.6", condnet_0);
-    LOAD_SUBMODULE_EX("condnet.8", condnet_0);
-    LOAD_SUBMODULE(classifier);
-}
-
-ggml_tensor *CausalConvRNNF0Predictor::build_cgraph(ggml_context *ctx, ggml_tensor *x) const
-{
-    x = condnet_0.build_cgraph(ctx, x);
-    x = ggml_elu(ctx, x);
-    x = condnet_2.build_cgraph(ctx, x);
-    x = ggml_elu(ctx, x);
-    x = condnet_4.build_cgraph(ctx, x);
-    x = ggml_elu(ctx, x);
-    x = condnet_6.build_cgraph(ctx, x);
-    x = ggml_elu(ctx, x);
-    x = condnet_8.build_cgraph(ctx, x);
-    x = ggml_elu(ctx, x);
-
-    x = ggml_permute(ctx, x, 1, 0, 2, 3);
-    x = ggml_cont(ctx, x);
-    x = classifier.build_cgraph(ctx, x);
-    x = ggml_reshape_2d(ctx, x, x->ne[1], x->ne[2]);
-
-    return ggml_abs(ctx, x);
-}
-#endif
 
 int CausalConv1d::causal_padding() const
 {
@@ -1551,7 +1477,10 @@ std::array<ggml_tensor*, 2> CausalHiFTGenerator::build_cgraph(ggml_context* ctx,
     {
         x = conv_pre.build_cgraph(ctx, speech_feat);
 
-        auto s_stft = ggml_stft(ctx, s, window, hop_len, true, fctx.get());
+        //to do 
+        //auto s_stft = ggml_stft(ctx, s, window, hop_len, true, fctx.get());
+
+        ggml_tensor *s_stft;
         s_stft = ggml_cont(ctx, s_stft);
         s_stft = ggml_reshape_2d(ctx, s_stft, s_stft->ne[0], s_stft->ne[1] * 2);
 
@@ -1591,78 +1520,14 @@ std::array<ggml_tensor*, 2> CausalHiFTGenerator::build_cgraph(ggml_context* ctx,
             auto imag = ggml_mul(ctx, magnitude,
                 ggml_sin(ctx, phase));
 
-            x = ggml_istft(ctx, real, imag, window, hop_len, true, ictx.get());
+            //to do 
+            //x = ggml_istft(ctx, real, imag, window, hop_len, true, ictx.get());
             x = ggml_clamp(ctx, x, -audio_limit, audio_limit);
             ggml_set_cpu(x);
             return { x, noise };
         }
     }
 }
-
-#if 0
-
-std::array<ggml_tensor *, 2>CausalHiFTGenerator::build_cgraph(ggml_context *ctx, ggml_tensor *speech_feat) const
-{
-    auto f0 = f0_predictor.build_cgraph(ctx, speech_feat);
-    auto s_input = ggml_permute(ctx, f0, 1, 0, 2, 3);
-    s_input = ggml_interpolate(ctx, s_input, s_input->ne[0], s_input->ne[1] * scale_factor, s_input->ne[2], 1, GGML_SCALE_MODE_NEAREST);
-    auto [s, noise] = m_source.build_cgraph(ctx, s_input, nb_harmonics, sampling_rate, scale_factor,
-            nsf_alpha, nsf_voiced_threshold, nsf_sigma);
-    s = ggml_permute(ctx, s, 1, 0, 2, 3);
-
-    /* decode */
-    ggml_tensor *x;
-    {
-        x = conv_pre.build_cgraph(ctx, speech_feat);
-
-		auto s_stft = ggml_stft(ctx, s, window, hop_len, true, fctx.get());
-		s_stft = ggml_cont(ctx, s_stft);
-		s_stft = ggml_reshape_2d(ctx, s_stft, s_stft->ne[0], s_stft->ne[1] * 2);
-
-        const auto num_upsamples = ups.size();
-        const auto num_kernels = resblocks.size() / num_upsamples;
-        for(size_t i = 0; i != num_upsamples; ++i)
-        {
-            x = ggml_leaky_relu(ctx, x, lrelu_slope, false);
-            x = ups[i].build_cgraph(ctx, x);
-
-            if(i == num_upsamples -1)
-                x = ggml_pad_reflect_1d(ctx, x, 1, 0);
-
-			auto si = source_downs[i]->build_cgraph(ctx, s_stft);
-			si = source_resblocks[i].build_cgraph(ctx, si);
-			x = ggml_add(ctx, x, si);
-
-            auto xs = resblocks[i * num_kernels].build_cgraph(ctx, x);
-            for(size_t j = 1; j != num_kernels; ++j)
-            {
-                xs = ggml_add(ctx, xs,
-                        resblocks[i * num_kernels + j].build_cgraph(ctx, x));
-            }
-            x = ggml_scale(ctx, xs, 1.f / num_kernels);
-        }
-        x = ggml_leaky_relu(ctx, x, 0.01f, false);
-        x = conv_post.build_cgraph(ctx, x);
-
-        auto magnitude = ggml_view_3d(ctx, x, x->ne[0], nfft / 2 + 1, x->ne[2], x->nb[1], x->nb[2], 0);
-        magnitude = ggml_exp(ctx, magnitude);
-        auto phase = ggml_view_3d(ctx, x, x->ne[0], nfft / 2 + 1, x->ne[2], x->nb[1], x->nb[2], (nfft / 2 + 1) * x->nb[1]);
-        phase = ggml_sin(ctx, phase);
-        /* istft */
-        {
-            magnitude = ggml_clamp(ctx, magnitude, 0.f, 1e2f);
-            auto real = ggml_mul(ctx, magnitude, ggml_cos(ctx, phase));
-            auto imag = ggml_mul(ctx, magnitude, ggml_sin(ctx, phase));
-
-            x = ggml_istft(ctx, real, imag, window, hop_len, true, ictx.get());
-            x = ggml_clamp(ctx, x, -audio_limit, audio_limit);
-            ggml_set_cpu(x);
-            return {x, noise};
-        }
-    }
-}
-#endif
-
 
 void CosyVoice3LM::onload(const gguf_loader &loader, const std::string &prefix)
 {
@@ -1692,5 +1557,4 @@ void CosyVoice3LM::onload(const gguf_loader &loader, const std::string &prefix)
         LOAD_SUBMODULE_EX(name.c_str(), layer);
     }
 }
-
 

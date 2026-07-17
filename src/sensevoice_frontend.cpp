@@ -4,6 +4,7 @@
 #include "thread_pool.h"
 #include "log_mel_filter_bank.h"
 #include "sensevoice_cmvn.h"
+//to do 
 
 #define M_2PI 6.283185307179586476925286766559005
 #define SIN_COS_N_COUNT 512
@@ -18,7 +19,8 @@ void rdft(int n, int isgn, double *a, int *ip, double *w);
 
 static void rfft(const std::vector<double> &in) {
   int n = in.size();
-  rdft(n, 1, (double *)in.data(), ip_.data(), (double *)w_.data());
+  //to do 
+  //rdft(n, 1, (double *)in.data(), ip_.data(), (double *)w_.data());
 
 }
 

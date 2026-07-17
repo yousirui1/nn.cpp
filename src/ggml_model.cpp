@@ -108,6 +108,82 @@ void ggml_print_tensor(struct ggml_tensor * tensor) {
     }
 }
 
+int get_ggml_op_capabilities()
+{
+#if 0
+    struct ggml_init_params params = {
+       /*.mem_size   =*/ .mem_size = ggml_graph_overhead(), 
+       /*.no_alloc   =*/ .no_alloc = true,
+    };
+
+    struct ggml_context *ctx = ggml_init(params);
+    if(!ctx)
+    {
+        return ERROR;
+    }
+
+    ggml_tensor* a = ggml_new_tensor_1d(ctx0, GGML_TYPE_I32, 1); 
+    a = ggml_concat(ctx0, a, a, 0); 
+    op_caps.concat_i32 = ggml_backend_supports_op(backend, a); 
+
+    a = ggml_new_tensor_3d(ctx0, GGML_TYPE_F16, 11, 4, 51);
+    a = ggml_repeat_4d(ctx0, a, 11, 4, 51, 4); 
+    op_caps.repeat_f16 = ggml_backend_supports_op(backend, a); 
+
+    a = ggml_new_tensor_2d(ctx0, GGML_TYPE_F32, 16, 4); 
+    a = ggml_pad(ctx0, a, 4, 0, 0, 0); 
+    op_caps.pad = ggml_backend_supports_op(backend, a); 
+
+    a = ggml_fill(ctx0, a, 0.0f);
+    op_caps.fill = ggml_backend_supports_op(backend, a); 
+
+    a = ggml_cumsum(ctx0, a); 
+    op_caps.cumsum = ggml_backend_supports_op(backend, a); 
+
+    a = ggml_new_tensor_1d(ctx0, GGML_TYPE_F32, 16);
+    a = ggml_pad_reflect_1d(ctx0, a, 1, 0); 
+    op_caps.pad_reflect_1d = ggml_backend_supports_op(backend, a); 
+
+    op_caps.top_k = ggml_backend_supports_op(backend, ggml_top_k(ctx0, a, 5));
+
+    op_caps.leaky_relu = ggml_backend_supports_op(backend, ggml_leaky_relu(ctx0, a, 0.01f, false));
+
+    op_caps.sin = ggml_backend_supports_op(backend, ggml_sin(ctx0, a));
+    op_caps.cos = ggml_backend_supports_op(backend, ggml_cos(ctx0, a));
+
+    op_caps.arange = ggml_backend_supports_op(backend, ggml_arange(ctx0, 0.f, 10.f, 1.f));
+
+    op_caps.elu = ggml_backend_supports_op(backend, ggml_elu(ctx0, a));
+    op_caps.abs = ggml_backend_supports_op(backend, ggml_abs(ctx0, a));
+    op_caps.floor = ggml_backend_supports_op(backend, ggml_floor(ctx0, a));
+
+    {   
+        auto a2 = ggml_new_tensor_2d(ctx0, GGML_TYPE_F32, 16, 4); 
+        auto b = ggml_new_tensor_2d(ctx0, GGML_TYPE_F32, 16, 4); 
+        op_caps.acc = ggml_backend_supports_op(backend, ggml_acc(ctx0, a2, b, a2->nb[1], a2->nb[2], a2->nb[3], 0));
+    }   
+
+    {   
+        ggml_tensor* w = ggml_new_tensor_3d(ctx0, GGML_TYPE_F16, 3, 4, 8); 
+        a = ggml_new_tensor_3d(ctx0, GGML_TYPE_F16, 16, 4, 1);
+        a = ggml_im2col(ctx0, w, a, 1, 0, 0, 0, 1, 0, false, GGML_TYPE_F16);
+        op_caps.im2col_f16 = ggml_backend_supports_op(backend, a);
+    }
+        struct ggml_tensor *a = ggml_new_tensor_1d(ctx, GGML_TYPE_I32, 1);
+        a = ggml_concat(ctx, a, a, 0);
+        ggml_handle->op_caps.concat_i32 = ggml_backend_supports_op(ggml_handle->backend, a);
+
+        a = ggml_new_tensor_3d(ctx, GGML_TYPE_F16, 11, 4, 51);
+        a = ggml_repeat_4d(ctx, a, 11, 4, 51, 4);
+        ggml_handle->op_caps.repeat_f16 = ggml_backend_supports_op(ggml_handle->backend, a);
+
+        ggml_free(ctx);
+        LOG_DEBUG("concat_i32 %d repeat_f16 %d", ggml_handle->op_caps.concat_i32, ggml_handle->op_caps.repeat_f16);
+    }
+#endif
+
+}
+
 int init_ggml()
 {
     if(is_init)
@@ -129,7 +205,8 @@ int init_ggml()
     {
         cpu_backend = backend;
     }
-    //op
+
+    get_ggml_op_capabilities();
     return SUCCESS;
 }
 
