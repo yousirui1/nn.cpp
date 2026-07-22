@@ -1,18 +1,45 @@
-*.ipch
-Debug
-.vs
-x64
-Release
-*.user
-*.d
+```
+# Compiled and build artifacts
 *.o
 *.obj
-debug.*
-release.*
-build
 *.a
 *.so
+*.dll
+*.exe
+*.out
+
+# Dependencies
+venv/
+.venv/
+__pycache__/
+*.egg-info/
+build/
+dist/
+*.pyc
+*.pyo
+*.pyd
+
+# Logs and temp files
 *.log
-__pycache__
-vallog.txt
-*.sw*
+*.tmp
+*.swp
+*.swo
+
+# Environment
+.env
+.env.local
+*.env.*
+
+# Editors
+.vscode/
+.idea/
+
+# Coverage
+.coverage
+coverage/
+htmlcov/
+
+# Python cache
+.mypy_cache/
+.pytest_cache/
+```
