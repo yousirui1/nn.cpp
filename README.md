@@ -6,3 +6,5 @@
     worker 
     bpe parse
 
+[参考](https://github.com/Lourdle/cosyvoice.cpp) 
+[参考](https://github.com/lovemefan/SenseVoice.cpp)) 
