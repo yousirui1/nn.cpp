@@ -2,10 +2,10 @@
 # Compiled and build artifacts
 *.o
 *.obj
-*.a
-*.so
-*.dll
 *.exe
+*.dll
+*.so
+*.a
 *.out
 
 # Dependencies
@@ -13,17 +13,17 @@ venv/
 .venv/
 __pycache__/
 *.egg-info/
+node_modules/
+
+# Build directories
 build/
 dist/
-*.pyc
-*.pyo
-*.pyd
+target/
 
 # Logs and temp files
 *.log
 *.tmp
 *.swp
-*.swo
 
 # Environment
 .env
@@ -33,13 +33,19 @@ dist/
 # Editors
 .vscode/
 .idea/
+*.swp
+*.swo
 
 # Coverage
 .coverage
 coverage/
 htmlcov/
 
-# Python cache
-.mypy_cache/
-.pytest_cache/
+# Python specific
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+.PyInstaller/
 ```
