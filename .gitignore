@@ -1,24 +1,20 @@
 ```
-# Compiled and build artifacts
+# Build artifacts
+debug.linux/
+*.d
 *.o
 *.obj
-*.exe
-*.dll
-*.so
-*.a
 *.out
 
 # Dependencies
-venv/
-.venv/
-__pycache__/
-*.egg-info/
 node_modules/
-
-# Build directories
-build/
-dist/
+.venv/
+venv/
+__pycache__/
+.mypy_cache/
+.pytest_cache/
 target/
+.gradle/
 
 # Logs and temp files
 *.log
@@ -33,19 +29,13 @@ target/
 # Editors
 .vscode/
 .idea/
-*.swp
-*.swo
 
 # Coverage
-.coverage
 coverage/
 htmlcov/
+.coverage
 
-# Python specific
-*.pyc
-*.pyo
-*.pyd
-.Python
-*.so
-.PyInstaller/
+# OS
+.DS_Store
+Thumbs.db
 ```
